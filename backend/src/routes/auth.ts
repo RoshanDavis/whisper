@@ -103,4 +103,20 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// Fetch a user's Public Key by their ID
+router.get('/users/:id/key', async (req, res) => {
+  try {
+    const targetUser = await db.select().from(users).where(eq(users.id, req.params.id)).limit(1);
+    
+    if (targetUser.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.status(200).json({ publicKey: targetUser[0].publicKey });
+  } catch (error) {
+    console.error('Error fetching public key:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;
