@@ -1,26 +1,27 @@
 // backend/src/db/schema.ts
-import { pgTable, uuid, varchar, text, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  username: varchar('username', { length: 50 }).notNull().unique(),
-  passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+  id: uuid('id').primaryKey().defaultRandom(),
+  username: text('username').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  publicKey: text('public_key').notNull(),
   
-  // The permanent public key generated at registration
-  publicKey: text('public_key').notNull(), 
+  // --- NEW KEY WRAPPING COLUMNS ---
+  encryptedPrivateKey: text('encrypted_private_key').notNull(),
+  keyIv: text('key_iv').notNull(),
+  keySalt: text('key_salt').notNull(),
+  // --------------------------------
   
-  createdAt: timestamp('created_at').defaultNow().notNull(), 
+  createdAt: timestamp('created_at').defaultNow(),
 });
 
+// ... (Your messages table stays exactly the same)
 export const messages = pgTable('messages', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  
+  id: uuid('id').primaryKey().defaultRandom(),
   senderId: uuid('sender_id').references(() => users.id).notNull(),
   receiverId: uuid('receiver_id').references(() => users.id).notNull(),
-  
-  // The AES-256-GCM encrypted message and Initialization Vector
   ciphertext: text('ciphertext').notNull(),
   iv: text('iv').notNull(),
-  
-  sentAt: timestamp('sent_at').defaultNow().notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
 });
