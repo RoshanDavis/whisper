@@ -1,6 +1,15 @@
 // frontend/src/components/Auth.tsx
 import { useState } from 'react';
-import { generateKeyPair, exportPublicKey, exportPrivateKey } from '../utils/crypto';
+import { 
+  generateKeyPair, 
+  exportPublicKey, 
+  exportPrivateKey,
+  deriveKeyFromPassword,
+  wrapPrivateKey,
+  unwrapPrivateKey,
+  arrayBufferToBase64,
+  base64ToArrayBuffer
+} from '../utils/crypto';
 
 interface AuthProps {
   onAuthSuccess: (token: string, username: string, userId: string) => void;
@@ -11,7 +20,7 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false); // Added a loading state because crypto math takes a split second
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,19 +29,28 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
 
     try {
       let payload: any = { username, password };
-      let privateKeyBase64 = '';
 
-      // If we are registering, we need to generate keys first!
+      // ==========================================
+      // REGISTRATION FLOW: THE WRAPPING PHASE
+      // ==========================================
       if (!isLogin) {
-        // 1. Generate the ECDH Key Pair
+        // 1. Generate the raw ECDH Key Pair
         const keyPair = await generateKeyPair();
+
+        // 2. Generate a random 16-byte Salt for the PBKDF2 math
+        const salt = window.crypto.getRandomValues(new Uint8Array(16));
         
-        // 2. Export them to Base64 strings
-        const publicKeyBase64 = await exportPublicKey(keyPair.publicKey);
-        privateKeyBase64 = await exportPrivateKey(keyPair.privateKey);
-        
-        // 3. Attach the REAL public key to the payload going to the backend
-        payload.publicKey = publicKeyBase64;
+        // 3. Crush the password into a heavy-duty AES wrapper key
+        const wrapperKey = await deriveKeyFromPassword(password, salt);
+
+        // 4. Wrap (Lock) the Private Key
+        const { wrappedKeyBase64, ivBase64 } = await wrapPrivateKey(keyPair.privateKey, wrapperKey);
+
+        // 5. Package it all up for Supabase
+        payload.publicKey = await exportPublicKey(keyPair.publicKey);
+        payload.encryptedPrivateKey = wrappedKeyBase64;
+        payload.keyIv = ivBase64;
+        payload.keySalt = arrayBufferToBase64(salt.buffer);
       }
 
       const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
@@ -49,15 +67,35 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
         throw new Error(data.error || 'Authentication failed');
       }
 
+      // ==========================================
+      // LOGIN FLOW: THE UNWRAPPING PHASE
+      // ==========================================
       if (isLogin && data.token) {
-        onAuthSuccess(data.token, data.user.username, data.user.id);
+        try {
+          // 1. Get the salt from the database and prepare it for math
+          const saltBuffer = base64ToArrayBuffer(data.user.keySalt);
+          const salt = new Uint8Array(saltBuffer);
+
+          // 2. Re-crush the typed password into the exact same AES wrapper key
+          const wrapperKey = await deriveKeyFromPassword(password, salt);
+
+          // 3. Unwrap (Unlock) the Private Key using the wrapper key
+          const privateKey = await unwrapPrivateKey(data.user.encryptedPrivateKey, wrapperKey, data.user.keyIv);
+
+          // 4. Save the raw, unlocked private key to localStorage for this session
+          const privateKeyBase64 = await exportPrivateKey(privateKey);
+          localStorage.setItem(`whisper_priv_${username}`, privateKeyBase64);
+
+          // Success! Let the user into the app.
+          onAuthSuccess(data.token, data.user.username, data.user.id);
+        } catch (unwrapError) {
+          console.error("Unwrapping failed:", unwrapError);
+          throw new Error("Failed to unlock your cryptographic keys. Please check your password.");
+        }
       } else {
-        // Registration successful! 
-        // Save the PRIVATE key securely in the browser, tied to their username
-        localStorage.setItem(`whisper_priv_${username}`, privateKeyBase64);
-        
+        // We make them log in immediately after registering to verify the unwrapping works!
         setIsLogin(true);
-        setError('Registration successful! Your secure keys were generated. Please log in.');
+        setError('Registration successful! Your keys are securely wrapped. Please log in.');
       }
     } catch (err: any) {
       setError(err.message);
@@ -109,7 +147,7 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
             disabled={isLoading}
             className="w-full bg-emerald-500 hover:bg-emerald-400 text-gray-900 font-bold py-2 px-4 rounded-lg transition-colors mt-4 disabled:opacity-50"
           >
-            {isLoading ? 'Processing...' : (isLogin ? 'Sign In' : 'Create Account')}
+            {isLoading ? 'Processing Crypto...' : (isLogin ? 'Sign In & Unlock' : 'Create Secure Account')}
           </button>
         </form>
 

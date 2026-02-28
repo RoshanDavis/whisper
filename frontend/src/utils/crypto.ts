@@ -4,7 +4,7 @@
  * Helper function: Converts a raw memory ArrayBuffer into a Base64 string
  * so we can easily save it to Supabase or the browser's localStorage.
  */
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
+export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = '';
   for (let i = 0; i < bytes.byteLength; i++) {
@@ -50,7 +50,7 @@ export async function exportPrivateKey(key: CryptoKey): Promise<string> {
 /**
  * Helper function: Converts a Base64 string back into a raw memory ArrayBuffer
  */
-function base64ToArrayBuffer(base64: string): ArrayBuffer {
+export function base64ToArrayBuffer(base64: string): ArrayBuffer {
   const binary_string = window.atob(base64);
   const len = binary_string.length;
   const bytes = new Uint8Array(len);
@@ -140,4 +140,85 @@ export async function decryptMessage(sharedKey: CryptoKey, ciphertextBase64: str
 
   const decoder = new TextDecoder();
   return decoder.decode(decryptedBuffer);
+}
+
+/**
+ * Helper: Convert a string password into a raw CryptoKey for derivation
+ */
+async function getPasswordKey(password: string): Promise<CryptoKey> {
+  const encoder = new TextEncoder();
+  return await window.crypto.subtle.importKey(
+    'raw',
+    encoder.encode(password),
+    { name: 'PBKDF2' },
+    false,
+    ['deriveKey']
+  );
+}
+
+/**
+ * 9. Derive an AES-GCM key from a password using PBKDF2
+ * Requires a random cryptographic Salt (which we will save to the database)
+ */
+export async function deriveKeyFromPassword(password: string, salt: Uint8Array): Promise<CryptoKey> {
+  const passwordKey = await getPasswordKey(password);
+  return await window.crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt: salt as BufferSource,
+      iterations: 100000, // Industry standard for brute-force resistance
+      hash: 'SHA-256',
+    },
+    passwordKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+/**
+ * 10. Wrap (Encrypt) the Private ECDH Key using the Password-Derived AES Key
+ */
+export async function wrapPrivateKey(privateKey: CryptoKey, wrapperKey: CryptoKey): Promise<{ wrappedKeyBase64: string, ivBase64: string }> {
+  // Export the ECDH private key to a raw format we can encrypt
+  const exportedPrivateKey = await window.crypto.subtle.exportKey('pkcs8', privateKey);
+  
+  // AES-GCM needs a unique IV for the wrapping process
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+
+  // Encrypt the exported key
+  const wrappedKeyBuffer = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: iv },
+    wrapperKey,
+    exportedPrivateKey
+  );
+
+  return {
+    wrappedKeyBase64: arrayBufferToBase64(wrappedKeyBuffer),
+    ivBase64: arrayBufferToBase64(iv.buffer)
+  };
+}
+
+/**
+ * 11. Unwrap (Decrypt) the Private ECDH Key using the Password-Derived AES Key
+ */
+export async function unwrapPrivateKey(wrappedKeyBase64: string, wrapperKey: CryptoKey, ivBase64: string): Promise<CryptoKey> {
+  const wrappedKeyBuffer = base64ToArrayBuffer(wrappedKeyBase64);
+  const ivBuffer = base64ToArrayBuffer(ivBase64);
+
+  // Decrypt the raw private key data
+  const decryptedKeyBuffer = await window.crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: new Uint8Array(ivBuffer) },
+    wrapperKey,
+    wrappedKeyBuffer
+  );
+
+  // Turn it back into a functional ECDH CryptoKey
+  return await window.crypto.subtle.importKey(
+    'pkcs8',
+    decryptedKeyBuffer,
+    { name: 'ECDH', namedCurve: 'P-256' },
+    true,
+    ['deriveKey', 'deriveBits']
+  );
 }
