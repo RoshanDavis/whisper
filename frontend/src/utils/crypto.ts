@@ -222,3 +222,113 @@ export async function unwrapPrivateKey(wrappedKeyBase64: string, wrapperKey: Cry
     ['deriveKey', 'deriveBits']
   );
 }
+
+// ==========================================
+// ECDSA DIGITAL SIGNATURE FUNCTIONS
+// ==========================================
+
+/**
+ * 12. Generate an ECDSA Key Pair for Digital Signatures
+ */
+export async function generateEcdsaKeyPair(): Promise<CryptoKeyPair> {
+  return await window.crypto.subtle.generateKey(
+    {
+      name: 'ECDSA',
+      namedCurve: 'P-256',
+    },
+    true, // extractable
+    ['sign', 'verify'] // Note the strict separation of duties!
+  );
+}
+
+/**
+ * 13. Import the Base64 Public Signing Key
+ */
+export async function importEcdsaPublicKey(base64Key: string): Promise<CryptoKey> {
+  const buffer = base64ToArrayBuffer(base64Key);
+  return await window.crypto.subtle.importKey(
+    'raw',
+    buffer,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['verify']
+  );
+}
+
+/**
+ * 14. Unwrap (Decrypt) the Private ECDSA Key
+ * (We need a special unwrap function because Web Crypto requires 
+ * us to tag the restored key with 'ECDSA' and 'sign')
+ */
+export async function unwrapEcdsaPrivateKey(wrappedKeyBase64: string, wrapperKey: CryptoKey, ivBase64: string): Promise<CryptoKey> {
+  const wrappedKeyBuffer = base64ToArrayBuffer(wrappedKeyBase64);
+  const ivBuffer = base64ToArrayBuffer(ivBase64);
+
+  // Decrypt the raw private key data
+  const decryptedKeyBuffer = await window.crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: new Uint8Array(ivBuffer) },
+    wrapperKey,
+    wrappedKeyBuffer
+  );
+
+  // Turn it back into a functional ECDSA CryptoKey
+  return await window.crypto.subtle.importKey(
+    'pkcs8',
+    decryptedKeyBuffer,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['sign']
+  );
+}
+
+/**
+ * 15. Sign a message (or ciphertext) using the Private ECDSA Key
+ */
+export async function signData(privateKey: CryptoKey, data: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const encodedData = encoder.encode(data);
+
+  const signatureBuffer = await window.crypto.subtle.sign(
+    {
+      name: 'ECDSA',
+      hash: { name: 'SHA-256' },
+    },
+    privateKey,
+    encodedData
+  );
+
+  return arrayBufferToBase64(signatureBuffer);
+}
+
+/**
+ * 16. Verify a signature using the Sender's Public ECDSA Key
+ */
+export async function verifySignature(publicKey: CryptoKey, signatureBase64: string, data: string): Promise<boolean> {
+  const encoder = new TextEncoder();
+  const encodedData = encoder.encode(data);
+  const signatureBuffer = base64ToArrayBuffer(signatureBase64);
+
+  return await window.crypto.subtle.verify(
+    {
+      name: 'ECDSA',
+      hash: { name: 'SHA-256' },
+    },
+    publicKey,
+    signatureBuffer,
+    encodedData
+  );
+}
+
+/**
+ * 17. Import the Base64 Private Signing Key from localStorage
+ */
+export async function importEcdsaPrivateKey(base64Key: string): Promise<CryptoKey> {
+  const buffer = base64ToArrayBuffer(base64Key);
+  return await window.crypto.subtle.importKey(
+    'pkcs8',
+    buffer,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['sign']
+  );
+}

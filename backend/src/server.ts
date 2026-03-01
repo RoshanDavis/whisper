@@ -44,7 +44,8 @@ io.on('connection', (socket) => {
   });
 
 // 2. Listen for incoming ENCRYPTED messages and save them
-  socket.on('sendMessage', async (data: { receiverId: string, ciphertext: string, iv: string }) => {
+  // ---> NEW: Added signature to the expected data payload!
+  socket.on('sendMessage', async (data: { receiverId: string, ciphertext: string, iv: string, signature: string }) => {
     try {
       const senderId = connectedUsers.get(socket.id);
       
@@ -58,10 +59,11 @@ io.on('connection', (socket) => {
         senderId: senderId,
         receiverId: data.receiverId,
         ciphertext: data.ciphertext, 
-        iv: data.iv, // Saving the real AES-GCM Initialization Vector!
+        iv: data.iv, 
+        signature: data.signature, // ---> NEW: Saving the ECDSA signature to the database!
       }).returning();
 
-      console.log('✅ Encrypted message saved to database!');
+      console.log('✅ Encrypted and signed message saved to database!');
 
       // 4. Broadcast the saved message back to the clients
       io.emit('receiveMessage', savedMessage[0]);

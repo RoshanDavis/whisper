@@ -1,4 +1,3 @@
-// frontend/src/components/Auth.tsx
 import { useState } from 'react';
 import { 
   generateKeyPair, 
@@ -8,7 +7,9 @@ import {
   wrapPrivateKey,
   unwrapPrivateKey,
   arrayBufferToBase64,
-  base64ToArrayBuffer
+  base64ToArrayBuffer,
+  generateEcdsaKeyPair,    // <-- NEW
+  unwrapEcdsaPrivateKey    // <-- NEW
 } from '../utils/crypto';
 
 interface AuthProps {
@@ -31,26 +32,30 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
       let payload: any = { username, password };
 
       // ==========================================
-      // REGISTRATION FLOW: THE WRAPPING PHASE
+      // REGISTRATION FLOW
       // ==========================================
       if (!isLogin) {
-        // 1. Generate the raw ECDH Key Pair
-        const keyPair = await generateKeyPair();
+        // 1. Generate BOTH Key Pairs
+        const ecdhKeyPair = await generateKeyPair(); // For encryption
+        const ecdsaKeyPair = await generateEcdsaKeyPair(); // For digital signatures
 
-        // 2. Generate a random 16-byte Salt for the PBKDF2 math
+        // 2. Generate Salt & Derive Master Wrapper Key
         const salt = window.crypto.getRandomValues(new Uint8Array(16));
-        
-        // 3. Crush the password into a heavy-duty AES wrapper key
         const wrapperKey = await deriveKeyFromPassword(password, salt);
 
-        // 4. Wrap (Lock) the Private Key
-        const { wrappedKeyBase64, ivBase64 } = await wrapPrivateKey(keyPair.privateKey, wrapperKey);
+        // 3. Wrap BOTH Private Keys
+        const ecdhWrapped = await wrapPrivateKey(ecdhKeyPair.privateKey, wrapperKey);
+        const ecdsaWrapped = await wrapPrivateKey(ecdsaKeyPair.privateKey, wrapperKey);
 
-        // 5. Package it all up for Supabase
-        payload.publicKey = await exportPublicKey(keyPair.publicKey);
-        payload.encryptedPrivateKey = wrappedKeyBase64;
-        payload.keyIv = ivBase64;
+        // 4. Package for Supabase
+        payload.publicKey = await exportPublicKey(ecdhKeyPair.publicKey);
+        payload.encryptedPrivateKey = ecdhWrapped.wrappedKeyBase64;
+        payload.keyIv = ecdhWrapped.ivBase64;
         payload.keySalt = arrayBufferToBase64(salt.buffer);
+
+        payload.publicSigningKey = await exportPublicKey(ecdsaKeyPair.publicKey);
+        payload.encryptedSigningPrivateKey = ecdsaWrapped.wrappedKeyBase64;
+        payload.signingKeyIv = ecdsaWrapped.ivBase64;
       }
 
       const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
@@ -68,34 +73,32 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
       }
 
       // ==========================================
-      // LOGIN FLOW: THE UNWRAPPING PHASE
+      // LOGIN FLOW
       // ==========================================
       if (isLogin && data.token) {
         try {
-          // 1. Get the salt from the database and prepare it for math
           const saltBuffer = base64ToArrayBuffer(data.user.keySalt);
           const salt = new Uint8Array(saltBuffer);
-
-          // 2. Re-crush the typed password into the exact same AES wrapper key
           const wrapperKey = await deriveKeyFromPassword(password, salt);
 
-          // 3. Unwrap (Unlock) the Private Key using the wrapper key
-          const privateKey = await unwrapPrivateKey(data.user.encryptedPrivateKey, wrapperKey, data.user.keyIv);
+          // 1. Unwrap the Encryption Key
+          const ecdhPrivateKey = await unwrapPrivateKey(data.user.encryptedPrivateKey, wrapperKey, data.user.keyIv);
+          const ecdhPrivateKeyBase64 = await exportPrivateKey(ecdhPrivateKey);
+          localStorage.setItem(`whisper_priv_${username}`, ecdhPrivateKeyBase64);
 
-          // 4. Save the raw, unlocked private key to localStorage for this session
-          const privateKeyBase64 = await exportPrivateKey(privateKey);
-          localStorage.setItem(`whisper_priv_${username}`, privateKeyBase64);
+          // 2. Unwrap the Signing Key
+          const ecdsaPrivateKey = await unwrapEcdsaPrivateKey(data.user.encryptedSigningPrivateKey, wrapperKey, data.user.signingKeyIv);
+          const ecdsaPrivateKeyBase64 = await exportPrivateKey(ecdsaPrivateKey);
+          localStorage.setItem(`whisper_sign_priv_${username}`, ecdsaPrivateKeyBase64);
 
-          // Success! Let the user into the app.
           onAuthSuccess(data.token, data.user.username, data.user.id);
         } catch (unwrapError) {
           console.error("Unwrapping failed:", unwrapError);
           throw new Error("Failed to unlock your cryptographic keys. Please check your password.");
         }
       } else {
-        // We make them log in immediately after registering to verify the unwrapping works!
         setIsLogin(true);
-        setError('Registration successful! Your keys are securely wrapped. Please log in.');
+        setError('Registration successful! Your dual keys are securely wrapped. Please log in.');
       }
     } catch (err: any) {
       setError(err.message);

@@ -9,26 +9,31 @@ const router = express.Router();
 
 router.post('/register', async (req, res) => {
   try {
-    // 1. Extract the new cryptographic fields from the request
-    const { username, password, publicKey, encryptedPrivateKey, keyIv, keySalt } = req.body;
+    const { 
+      username, 
+      password, 
+      publicKey, 
+      encryptedPrivateKey, 
+      keyIv, 
+      keySalt,
+      publicSigningKey,
+      encryptedSigningPrivateKey,
+      signingKeyIv
+    } = req.body;
 
-    // 2. Validate the incoming data
-    if (!username || !password || !publicKey || !encryptedPrivateKey || !keyIv || !keySalt) {
+    if (!username || !password || !publicKey || !encryptedPrivateKey || !keyIv || !keySalt || !publicSigningKey || !encryptedSigningPrivateKey || !signingKeyIv) {
       return res.status(400).json({ error: 'All cryptographic fields are required.' });
     }
 
-    // 3. Check if the username is already taken
     const existingUser = await db.select().from(users).where(eq(users.username, username)).limit(1);
     
     if (existingUser.length > 0) {
       return res.status(409).json({ error: 'Username already exists. Please choose another.' });
     }
 
-    // 4. Securely hash the password for authentication (using 10 salt rounds)
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // 5. Save the new user, Public Key, and Wrapped Private Key data to Supabase
     const newUser = await db.insert(users).values({
       username,
       passwordHash,
@@ -36,6 +41,9 @@ router.post('/register', async (req, res) => {
       encryptedPrivateKey,
       keyIv,
       keySalt,
+      publicSigningKey,
+      encryptedSigningPrivateKey,
+      signingKeyIv
     }).returning({
       id: users.id,
       username: users.username,
@@ -84,17 +92,23 @@ router.post('/login', async (req, res) => {
       { expiresIn: '24h' }
     );
 
-    // Send back the token AND the Wrapped Key data so the frontend can decrypt it!
     res.status(200).json({
       message: 'Login successful!',
       token,
       user: {
         id: user.id,
         username: user.username,
+        
+        // ECDH Encryption Keys
         publicKey: user.publicKey,
         encryptedPrivateKey: user.encryptedPrivateKey,
         keyIv: user.keyIv,
         keySalt: user.keySalt,
+
+        // ECDSA Signing Keys
+        publicSigningKey: user.publicSigningKey,
+        encryptedSigningPrivateKey: user.encryptedSigningPrivateKey,
+        signingKeyIv: user.signingKeyIv,
       }
     });
 
@@ -104,7 +118,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Fetch a user's Public Key by their ID
+// Fetch BOTH Public Keys (Encryption & Signing) by user ID
 router.get('/users/:id/key', async (req, res) => {
   try {
     const targetUser = await db.select().from(users).where(eq(users.id, req.params.id)).limit(1);
@@ -113,12 +127,17 @@ router.get('/users/:id/key', async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
     
-    res.status(200).json({ publicKey: targetUser[0].publicKey });
+    res.status(200).json({ 
+      publicKey: targetUser[0].publicKey,
+      publicSigningKey: targetUser[0].publicSigningKey 
+    });
   } catch (error) {
-    console.error('Error fetching public key:', error);
+    console.error('Error fetching public keys:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+
 
 // Fetch all registered users (so we can populate the chat sidebar)
 router.get('/users', async (req, res) => {
