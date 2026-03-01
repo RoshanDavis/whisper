@@ -1,7 +1,17 @@
 import { useEffect, useState, useRef } from 'react';
 import { io } from 'socket.io-client';
 import Auth from './components/Auth';
-import { importPrivateKey, importPublicKey, deriveSharedSecret, encryptMessage, decryptMessage } from './utils/crypto';
+import { 
+  importPrivateKey, 
+  importPublicKey, 
+  deriveSharedSecret, 
+  encryptMessage, 
+  decryptMessage,
+  importEcdsaPrivateKey, // NEW
+  importEcdsaPublicKey,  // NEW
+  signData,              // NEW
+  verifySignature        // NEW
+} from './utils/crypto';
 
 const socket = io('http://localhost:3000');
 
@@ -11,6 +21,7 @@ interface Message {
   senderId: string;
   receiverId: string;
   isOwnMessage: boolean;
+  isVerified?: boolean; // NEW: Track if the signature was valid
 }
 
 interface User {
@@ -57,10 +68,26 @@ export default function App() {
         if (!privKeyBase64) throw new Error("Private key not found!");
 
         const privateKey = await importPrivateKey(privKeyBase64);
+        
+        // Fetch BOTH public keys from the sender
         const res = await fetch(`http://localhost:3000/api/auth/users/${savedMessage.senderId}/key`);
-        const { publicKey: pubKeyBase64 } = await res.json();
+        const { publicKey: pubKeyBase64, publicSigningKey: pubSignKeyBase64 } = await res.json();
+        
         const publicKey = await importPublicKey(pubKeyBase64);
+        const publicSigningKey = await importEcdsaPublicKey(pubSignKeyBase64);
 
+        // ==========================================
+        // 1. VERIFY THE SIGNATURE FIRST
+        // ==========================================
+        const isValidSignature = await verifySignature(publicSigningKey, savedMessage.signature, savedMessage.ciphertext);
+        
+        if (!isValidSignature) {
+          throw new Error("SECURITY ALERT: Invalid signature! Message tampered with.");
+        }
+
+        // ==========================================
+        // 2. DECRYPT THE VERIFIED MESSAGE
+        // ==========================================
         const sharedSecret = await deriveSharedSecret(privateKey, publicKey);
         const decryptedText = await decryptMessage(sharedSecret, savedMessage.ciphertext, savedMessage.iv);
 
@@ -70,10 +97,19 @@ export default function App() {
           senderId: savedMessage.senderId,
           receiverId: savedMessage.receiverId,
           isOwnMessage: false,
+          isVerified: true,
         }]);
         
       } catch (err) {
-        console.error("Decryption failed:", err);
+        console.error("Verification/Decryption failed:", err);
+        setMessages((prev) => [...prev, {
+          id: savedMessage.id,
+          text: "⚠️ [Security Warning - Message Rejected]",
+          senderId: savedMessage.senderId,
+          receiverId: savedMessage.receiverId,
+          isOwnMessage: false,
+          isVerified: false,
+        }]);
       }
     });
 
@@ -84,53 +120,63 @@ export default function App() {
     };
   }, [userId, currentUser]); 
 
-  // --- NEW FEATURE: LOAD AND DECRYPT MESSAGE HISTORY ---
+  // LOAD MESSAGE HISTORY
   useEffect(() => {
     if (!selectedUser || !userId || !currentUser) return;
 
     const loadMessageHistory = async () => {
       try {
-        // 1. Fetch the encrypted rows from Supabase
         const res = await fetch(`http://localhost:3000/api/auth/messages/${userId}/${selectedUser.id}`);
         const encryptedHistory = await res.json();
 
-        // 2. Prep our cryptographic keys
         const privKeyBase64 = localStorage.getItem(`whisper_priv_${currentUser}`);
         if (!privKeyBase64) throw new Error("Private key not found!");
         
         const privateKey = await importPrivateKey(privKeyBase64);
+        
         const keyRes = await fetch(`http://localhost:3000/api/auth/users/${selectedUser.id}/key`);
-        const { publicKey: pubKeyBase64 } = await keyRes.json();
+        const { publicKey: pubKeyBase64, publicSigningKey: pubSignKeyBase64 } = await keyRes.json();
+        
         const publicKey = await importPublicKey(pubKeyBase64);
-
+        const publicSigningKey = await importEcdsaPublicKey(pubSignKeyBase64);
         const sharedSecret = await deriveSharedSecret(privateKey, publicKey);
 
-        // 3. Decrypt the entire array of messages in bulk
         const decryptedMessages: Message[] = [];
+        
         for (const msg of encryptedHistory) {
           try {
+            // Check if it's our own message or incoming
+            const isOwn = msg.senderId === userId;
+            let isValid = true;
+
+            // We only need to verify signatures of INCOMING messages
+            if (!isOwn) {
+              isValid = await verifySignature(publicSigningKey, msg.signature, msg.ciphertext);
+              if (!isValid) throw new Error("Signature invalid");
+            }
+
             const text = await decryptMessage(sharedSecret, msg.ciphertext, msg.iv);
             decryptedMessages.push({
               id: msg.id,
               text: text,
               senderId: msg.senderId,
               receiverId: msg.receiverId,
-              isOwnMessage: msg.senderId === userId,
+              isOwnMessage: isOwn,
+              isVerified: isValid,
             });
           } catch (err) {
             decryptedMessages.push({
               id: msg.id,
-              text: "🔒 [Encrypted Message - Decryption Failed]",
+              text: "⚠️ [Security Warning - Validation Failed]",
               senderId: msg.senderId,
               receiverId: msg.receiverId,
               isOwnMessage: msg.senderId === userId,
+              isVerified: false,
             });
           }
         }
 
-        // 4. Update the screen
         setMessages(decryptedMessages);
-
       } catch (err) {
         console.error("Failed to load message history:", err);
       }
@@ -138,7 +184,6 @@ export default function App() {
 
     loadMessageHistory();
   }, [selectedUser, userId, currentUser]);
-  // ---------------------------------------------------
 
   useEffect(() => {
     if (isConnected && userId) socket.emit('registerUser', userId);
@@ -179,36 +224,47 @@ export default function App() {
       senderId: userId,
       receiverId: selectedUser.id,
       isOwnMessage: true,
+      isVerified: true,
     };
     
-    // We update the screen instantly for a snappy UI, but we must also ensure 
-    // it doesn't get duplicated if we were to re-fetch history.
     setMessages((prev) => [...prev, myNewMessage]);
     
     const textToEncrypt = inputText;
     setInputText(''); 
 
     try {
+      // 1. Fetch our Encryption and Signing Private Keys
       const privKeyBase64 = localStorage.getItem(`whisper_priv_${currentUser}`);
-      if (!privKeyBase64) throw new Error("Private key not found!");
+      const signPrivKeyBase64 = localStorage.getItem(`whisper_sign_priv_${currentUser}`);
+      
+      if (!privKeyBase64 || !signPrivKeyBase64) throw new Error("Private keys not found!");
+      
       const privateKey = await importPrivateKey(privKeyBase64);
+      const signPrivateKey = await importEcdsaPrivateKey(signPrivKeyBase64);
 
+      // 2. Fetch Receiver's Public Key
       const res = await fetch(`http://localhost:3000/api/auth/users/${selectedUser.id}/key`);
       const { publicKey: pubKeyBase64 } = await res.json();
       const publicKey = await importPublicKey(pubKeyBase64);
 
+      // 3. Encrypt the Message
       const sharedSecret = await deriveSharedSecret(privateKey, publicKey);
       const { ciphertext, iv } = await encryptMessage(sharedSecret, textToEncrypt);
 
+      // 4. SIGN THE CIPHERTEXT
+      const signature = await signData(signPrivateKey, ciphertext);
+
+      // 5. Fire off the fully secure payload
       socket.emit('sendMessage', {
         receiverId: selectedUser.id, 
         ciphertext,
-        iv
+        iv,
+        signature // <--- Send the signature to the server!
       });
 
     } catch (err) {
-      console.error("Encryption error:", err);
-      alert("Failed to encrypt message. Check console.");
+      console.error("Encryption/Signing error:", err);
+      alert("Failed to securely send message. Check console.");
     }
   };
 
@@ -223,7 +279,6 @@ export default function App() {
   return (
     <div className="flex h-screen bg-gray-900 text-gray-100 font-sans overflow-hidden">
       
-      {/* SIDEBAR */}
       <aside className="w-1/4 min-w-[250px] bg-gray-800 border-r border-gray-700 flex flex-col">
         <div className="p-4 border-b border-gray-700">
           <h1 className="text-2xl font-bold text-emerald-400 tracking-wide mb-2">Whisper</h1>
@@ -262,7 +317,6 @@ export default function App() {
         </div>
       </aside>
 
-      {/* MAIN CHAT AREA */}
       <main className="flex-1 flex flex-col bg-gray-900">
         {!selectedUser ? (
           <div className="flex-1 flex items-center justify-center text-gray-500">
@@ -277,7 +331,7 @@ export default function App() {
               <div>
                 <h2 className="font-bold text-gray-100">{selectedUser.username}</h2>
                 <span className="text-xs text-emerald-400 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> E2E Encrypted
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> E2E Encrypted & Signed
                 </span>
               </div>
             </header>
@@ -290,7 +344,10 @@ export default function App() {
               ) : (
                 currentConversation.map((msg) => (
                   <div key={msg.id} className={`flex ${msg.isOwnMessage ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[75%] px-4 py-2 rounded-2xl ${msg.isOwnMessage ? 'bg-emerald-600 text-white rounded-br-none' : 'bg-gray-700 text-gray-100 rounded-bl-none'}`}>
+                    <div className={`max-w-[75%] px-4 py-2 rounded-2xl ${
+                      !msg.isVerified ? 'bg-red-900/50 text-red-200 border border-red-700 rounded-bl-none' :
+                      msg.isOwnMessage ? 'bg-emerald-600 text-white rounded-br-none' : 'bg-gray-700 text-gray-100 rounded-bl-none'
+                    }`}>
                       {msg.text}
                     </div>
                   </div>
