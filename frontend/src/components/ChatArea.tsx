@@ -34,12 +34,10 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
   const [inputText, setInputText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // 1. SCROLL TO BOTTOM
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // 2. LOAD & DECRYPT MESSAGE HISTORY
   useEffect(() => {
     if (!selectedContact || !userId || !currentUser) return;
 
@@ -48,12 +46,10 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
         const res = await fetch(`http://localhost:3000/api/auth/messages/${userId}/${selectedContact.id}`);
         const encryptedHistory = await res.json();
 
-        // Fetch our private encryption key from memory
         const privKeyBase64 = localStorage.getItem(`whisper_priv_${currentUser}`);
         if (!privKeyBase64) throw new Error("Private key missing");
         const privateKey = await importPrivateKey(privKeyBase64);
         
-        // Use the selected contact's keys passed down from the Sidebar!
         const publicKey = await importPublicKey(selectedContact.publicKey);
         const publicSigningKey = await importEcdsaPublicKey(selectedContact.publicSigningKey);
         
@@ -65,7 +61,6 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
             const isOwn = msg.senderId === userId;
             let isValid = true;
 
-            // Verify incoming signatures
             if (!isOwn) {
               isValid = await verifySignature(publicSigningKey, msg.signature, msg.ciphertext);
               if (!isValid) throw new Error("Signature invalid");
@@ -100,12 +95,10 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
     loadHistory();
   }, [selectedContact, userId, currentUser]);
 
-  // 3. LISTEN FOR INCOMING REAL-TIME MESSAGES
   useEffect(() => {
     if (!socket || !selectedContact || !userId || !currentUser) return;
 
     const handleReceive = async (savedMessage: any) => {
-      // Ignore if it's not for us, or not from the person we are currently looking at
       if (savedMessage.receiverId !== userId || savedMessage.senderId !== selectedContact.id) return;
 
       try {
@@ -139,7 +132,6 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
     return () => { socket.off('receiveMessage', handleReceive); };
   }, [socket, selectedContact, userId, currentUser]);
 
-  // 4. ENCRYPT, SIGN, AND SEND MESSAGE
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || !userId || !currentUser || !selectedContact || !socket) return;
@@ -147,7 +139,6 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
     const textToEncrypt = inputText;
     setInputText(''); 
 
-    // Optimistically show message in UI
     const tempId = Date.now().toString();
     setMessages((prev) => [...prev, {
       id: tempId,
@@ -182,12 +173,11 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
     }
   };
 
-  // UI: Empty State
   if (!selectedContact) {
     return (
-      <div className="flex-1 h-full bg-[#0f172a] m-4 ml-0 flex flex-col items-center justify-center relative overflow-hidden rounded-2xl border border-gray-700/50 shadow-lg">
-        <div className="absolute top-0 left-0 w-full h-0.5 bg-linear-to-r from-[#0ea5e9] to-emerald-500"></div>
-        <div className="w-16 h-16 rounded-full bg-[#1e293b] flex items-center justify-center mb-4 border border-gray-700">
+      <div className="flex-1 h-full bg-vault-base m-4 ml-0 flex flex-col items-center justify-center relative overflow-hidden rounded-2xl border border-gray-700/50 shadow-lg">
+        <div className="absolute top-0 left-0 w-full h-0.5 bg-linear-to-r from-brand to-emerald-500"></div>
+        <div className="w-16 h-16 rounded-full bg-vault-panel flex items-center justify-center mb-4 border border-gray-700">
           <svg className="w-8 h-8 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>
@@ -198,13 +188,11 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
     );
   }
 
-  // UI: Active Chat Session
   return (
-    <div className="flex-1 h-full bg-[#0f172a] m-4 ml-0 flex flex-col relative overflow-hidden rounded-2xl border border-gray-700/50 shadow-lg">
-      <div className="absolute top-0 left-0 w-full h-0.5 bg-linear-to-r from-[#0ea5e9] to-emerald-500 z-10"></div>
+    <div className="flex-1 h-full bg-vault-base m-4 ml-0 flex flex-col relative overflow-hidden rounded-2xl border border-gray-700/50 shadow-lg">
+      <div className="absolute top-0 left-0 w-full h-0.5 bg-linear-to-r from-brand to-emerald-500 z-10"></div>
       
-      {/* Header */}
-      <header className="px-6 py-4 bg-[#1e293b]/80 backdrop-blur-md border-b border-gray-700/50 flex items-center justify-between shrink-0 z-0">
+      <header className="px-6 py-4 bg-vault-panel/80 backdrop-blur-md border-b border-gray-700/50 flex items-center justify-between shrink-0 z-0">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-white font-bold shadow-inner">
             {selectedContact.username.charAt(0).toUpperCase()}
@@ -212,19 +200,17 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
           <div>
             <h2 className="font-bold text-gray-100">{selectedContact.username}</h2>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#0ea5e9] shadow-[0_0_5px_#0ea5e9]"></span>
-              <span className="text-xs text-[#0ea5e9] font-medium tracking-wide">E2EE Verified</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-brand shadow-[0_0_5px_var(--color-brand)]"></span>
+              <span className="text-xs text-brand font-medium tracking-wide">E2EE Verified</span>
             </div>
           </div>
         </div>
         
-        {/* Connection Status Indicator */}
         <div className={`text-xs px-2 py-1 rounded border ${isConnected ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
           {isConnected ? 'Socket Connected' : 'Socket Reconnecting...'}
         </div>
       </header>
 
-      {/* Message List */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-gray-700 z-0">
         {messages.length === 0 ? (
           <div className="flex h-full items-center justify-center flex-col text-gray-500">
@@ -237,7 +223,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
             <div key={msg.id} className={`flex ${msg.isOwnMessage ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[70%] px-5 py-3 rounded-2xl shadow-sm ${
                 !msg.isVerified ? 'bg-red-900/50 text-red-200 border border-red-700 rounded-bl-none' :
-                msg.isOwnMessage ? 'bg-[#0ea5e9] text-white rounded-br-none' : 'bg-[#1e293b] border border-gray-700/50 text-gray-100 rounded-bl-none'
+                msg.isOwnMessage ? 'bg-brand text-white rounded-br-none' : 'bg-vault-panel border border-gray-700/50 text-gray-100 rounded-bl-none'
               }`}>
                 {msg.text}
               </div>
@@ -247,20 +233,19 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
-      <footer className="p-4 bg-[#1e293b]/80 backdrop-blur-md border-t border-gray-700/50 shrink-0 z-0">
+      <footer className="p-4 bg-vault-panel/80 backdrop-blur-md border-t border-gray-700/50 shrink-0 z-0">
         <form onSubmit={handleSendMessage} className="flex gap-3 max-w-5xl mx-auto">
           <input 
             type="text" 
             value={inputText} 
             onChange={(e) => setInputText(e.target.value)} 
             placeholder="Type an encrypted message..." 
-            className="flex-1 bg-[#0f172a] border border-gray-700 rounded-full px-6 py-3.5 focus:outline-none focus:ring-1 focus:ring-[#0ea5e9] focus:border-[#0ea5e9] transition-all placeholder-gray-500 text-gray-100 text-sm shadow-inner" 
+            className="flex-1 bg-vault-base border border-gray-700 rounded-full px-6 py-3.5 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand transition-all placeholder-gray-500 text-gray-100 text-sm shadow-inner" 
           />
           <button 
             type="submit" 
             disabled={!inputText.trim()} 
-            className="bg-[#0ea5e9] hover:bg-[#0284c7] disabled:bg-gray-700 disabled:text-gray-500 disabled:shadow-none text-white font-bold px-8 py-3.5 rounded-full transition-all shadow-[0_0_15px_rgba(14,165,233,0.3)] flex items-center justify-center"
+            className="bg-brand hover:bg-brand-hover disabled:bg-gray-700 disabled:text-gray-500 disabled:shadow-none text-white font-bold px-8 py-3.5 rounded-full transition-all shadow-[0_0_15px_var(--color-brand-glow)] flex items-center justify-center"
           >
             Send
           </button>

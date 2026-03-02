@@ -1,1 +1,18 @@
 @import "tailwindcss";
+
+/* This is how we inject our custom brand colors in v4! */
+@theme {
+  --color-vault-base: #0f172a;
+  --color-vault-panel: #1e293b;
+  --color-vault-highlight: #273549;
+  
+  --color-brand: #0ea5e9;
+  --color-brand-hover: #0284c7;
+  --color-brand-glow: rgba(14, 165, 233, 0.3);
+}
+
+body {
+  background-color: var(--color-vault-base);
+  color: white;
+  margin: 0;
+}
