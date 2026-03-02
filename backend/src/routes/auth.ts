@@ -2,7 +2,7 @@ import express from 'express';
 import bcrypt from 'bcrypt';
 import { eq, or, and } from 'drizzle-orm';
 import { db } from '../db/index';
-import { users, messages } from '../db/schema';
+import { users, messages, contacts } from '../db/schema';
 import jwt from 'jsonwebtoken';
 
 const router = express.Router();
@@ -138,20 +138,86 @@ router.get('/users/:id/key', async (req, res) => {
 });
 
 
+// backend/src/routes/auth.ts
 
-// Fetch all registered users (so we can populate the chat sidebar)
-router.get('/users', async (req, res) => {
+// ==========================================
+// CONTACTS DIRECTORY
+// ==========================================
+
+// 1. Add a new contact by exact username
+router.post('/contacts/add', async (req, res) => {
   try {
-    // We only select the id and username. We DO NOT send password hashes!
-    const allUsers = await db.select({
-      id: users.id,
-      username: users.username,
-    }).from(users);
-    
-    res.status(200).json(allUsers);
+    const { ownerId, contactUsername } = req.body;
+
+    if (!ownerId || !contactUsername) {
+      return res.status(400).json({ error: 'Missing required fields.' });
+    }
+
+    // Step A: Find the user they are trying to add
+    const targetUser = await db.select().from(users).where(eq(users.username, contactUsername)).limit(1);
+
+    if (targetUser.length === 0) {
+      return res.status(404).json({ error: 'User not found. Check the username.' });
+    }
+
+    const contactId = targetUser[0].id;
+
+    if (ownerId === contactId) {
+      return res.status(400).json({ error: 'You cannot add yourself as a contact.' });
+    }
+
+    // Step B: Prevent duplicate contacts
+    const existingContact = await db.select().from(contacts).where(
+      and(eq(contacts.ownerId, ownerId), eq(contacts.contactId, contactId))
+    ).limit(1);
+
+    if (existingContact.length > 0) {
+      return res.status(409).json({ error: 'This user is already in your contacts.' });
+    }
+
+    // Step C: Save the relationship
+    await db.insert(contacts).values({ ownerId, contactId });
+
+    // Step D: Return the friend's info (including their public keys!) 
+    // so the React UI can update immediately
+    res.status(201).json({
+      message: 'Contact added successfully!',
+      contact: {
+        id: targetUser[0].id,
+        username: targetUser[0].username,
+        publicKey: targetUser[0].publicKey,
+        publicSigningKey: targetUser[0].publicSigningKey
+      }
+    });
+
   } catch (error) {
-    console.error('Error fetching users:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error adding contact:', error);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// 2. Fetch a user's private contact list
+router.get('/contacts/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // We do an Inner Join here to get the friend's actual username and keys,
+    // rather than just returning their UUID from the contacts table.
+    const userContacts = await db
+      .select({
+        id: users.id,
+        username: users.username,
+        publicKey: users.publicKey,
+        publicSigningKey: users.publicSigningKey
+      })
+      .from(contacts)
+      .innerJoin(users, eq(contacts.contactId, users.id))
+      .where(eq(contacts.ownerId, userId));
+
+    res.status(200).json(userContacts);
+  } catch (error) {
+    console.error('Error fetching contacts:', error);
+    res.status(500).json({ error: 'Internal server error.' });
   }
 });
 
