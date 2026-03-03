@@ -33,6 +33,19 @@
   --color-secondary-800: #9d2617;
   --color-secondary-900: #82251a;
   --color-secondary-950: #470f08;
+
+  --color-contact-1: #e11d48; /* Vibrant Crimson */
+  --color-contact-2: #059669; /* Deep Emerald */
+  --color-contact-3: #d97706; /* Rich Amber */
+  --color-contact-4: #7c3aed; /* Electric Violet */
+  --color-contact-5: #db2777; /* Bold Pink */
+  --color-contact-6: #ea580c; /* Bright Orange */
+  --color-contact-7: #65a30d; /* Vibrant Lime */
+  --color-contact-8: #c026d3; /* Deep Fuchsia */
+  --color-contact-9: #4f46e5; /* Rich Indigo */
+  --color-contact-10: #0d9488; /* Deep Teal */
+  --color-contact-11: #b91c1c; /* Brick Red */
+  --color-contact-12: #9333ea; /* Royal Purple */ 
 }
 
 body {

@@ -26,6 +26,28 @@ interface ChatAreaProps {
   selectedContact: any | null;
 }
 
+const getContactColor = (username: string) => {
+  const colors = [
+    'bg-contact-1',
+    'bg-contact-2',
+    'bg-contact-3',
+    'bg-contact-4',
+    'bg-contact-5',
+    'bg-contact-6',
+    'bg-contact-7',
+    'bg-contact-8',
+    'bg-contact-9',
+    'bg-contact-10',
+    'bg-contact-11',
+    'bg-contact-12'
+  ];
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) {
+    hash = username.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+};
+
 export default function ChatArea({ selectedContact }: ChatAreaProps) {
   const { currentUser, userId } = useAuth();
   const { socket, isConnected } = useSocket();
@@ -38,6 +60,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // FULLY RESTORED LOGIC
   useEffect(() => {
     if (!selectedContact || !userId || !currentUser) return;
 
@@ -177,6 +200,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
   if (!selectedContact) {
     return (
       <div className="flex-1 h-full bg-primary-950 ml-0 flex flex-col items-center justify-center relative overflow-hidden rounded-2xl border border-primary-50 shadow-lg mr-5">
+        <div className="absolute top-0 left-0 w-full h-0.5 bg-linear-to-r from-primary-400 to-secondary-500"></div>
         <div className="w-16 h-16 rounded-full bg-primary-900 flex items-center justify-center mb-4 border border-primary-800">
           <svg className="w-8 h-8 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -188,14 +212,15 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
     );
   }
 
+  // Get the specific shade for the currently selected contact
+ const contactColor = getContactColor(selectedContact.username);
+
   // UI: Active Chat Session
   return (
     <div className="flex-1 h-full bg-primary-950 ml-0 flex flex-col relative overflow-hidden rounded-2xl border border-primary-50 shadow-lg mr-5"> 
-      
-      {/* 1. Removed border-b from the header */}
       <header className="px-6 py-4 bg-primary-950 backdrop-blur-md flex items-center justify-between shrink-0 z-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-primary-800 flex items-center justify-center text-primary-50 font-bold shadow-inner border border-primary-700">
+          <div className={`w-10 h-10 rounded-full ${contactColor} flex items-center justify-center text-primary-50 font-bold shadow-inner`}>
             {selectedContact.username.charAt(0).toUpperCase()}
           </div>
           <div>
@@ -212,8 +237,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
         </div>
       </header>
 
-      {/* 2. Added the top separator line with margins */}
-      <div className="mx-6 h-px bg-linear-to-r from-transparent via-primary-500/50 to-transparent shrink-0"></div>
+      <div className="mx-6 h-px bg-linear-to-r from-transparent via-primary-400/80 to-transparent shrink-0"></div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6 z-0">
         {messages.length === 0 ? (
@@ -227,7 +251,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
             <div key={msg.id} className={`flex ${msg.isOwnMessage ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[70%] px-5 py-3 rounded-2xl shadow-sm ${
                 !msg.isVerified ? 'bg-secondary-900/50 text-secondary-200 border border-secondary-700 rounded-bl-none' :
-                msg.isOwnMessage ? 'bg-primary-600 text-primary-50 rounded-br-none' : 'bg-primary-900 border border-primary-800 text-primary-50 rounded-bl-none'
+                msg.isOwnMessage ? 'bg-primary-600 text-primary-50 rounded-br-none' : `${contactColor} text-primary-50 rounded-bl-none`
               }`}>
                 {msg.text}
               </div>
@@ -237,10 +261,8 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 3. Added the bottom separator line with margins */}
-      <div className="mx-5 h-px bg-linear-to-r from-transparent via-primary-500/70 to-transparent shrink-0"></div>
+      <div className="mx-6 h-px bg-linear-to-r from-transparent via-primary-400/80 to-transparent shrink-0"></div>
 
-      {/* 4. Removed border-t from the footer */}
       <footer className="p-4 bg-primary-950 backdrop-blur-md shrink-0 z-0">
         <form onSubmit={handleSendMessage} className="flex gap-3 max-w-5xl mx-auto">
           <input 

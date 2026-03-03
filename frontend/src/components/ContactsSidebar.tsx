@@ -13,6 +13,28 @@ interface ContactsSidebarProps {
   setSelectedContact: (contact: Contact) => void;
 }
 
+const getContactColor = (username: string) => {
+  const colors = [
+    'bg-contact-1',
+    'bg-contact-2',
+    'bg-contact-3',
+    'bg-contact-4',
+    'bg-contact-5',
+    'bg-contact-6',
+    'bg-contact-7',
+    'bg-contact-8',
+    'bg-contact-9',
+    'bg-contact-10',
+    'bg-contact-11',
+    'bg-contact-12'
+  ];
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) {
+    hash = username.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+};
+
 export default function ContactsSidebar({ selectedContact, setSelectedContact }: ContactsSidebarProps) {
   const { userId } = useAuth();
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -71,8 +93,11 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
     <div className="w-1/3 max-w-sm h-full bg-primary-950 border border-primary-50 rounded-xl flex flex-col relative shrink-0 ml-5">
       <div className="p-4 flex flex-col gap-4">
         <h2 className="text-primary-50 font-bold text-lg text-center mt-4 tracking-wide">Contacts</h2>
-        <div className="h-px w-full bg-linear-to-r from-transparent via-primary-500/50 to-transparent "></div>
-        <div className="relative border rounded-full hover:border-primary-500">
+        
+        {/* Updated line visibility to match ChatArea */}
+        <div className="h-px w-full bg-linear-to-r from-transparent via-primary-400/80 to-transparent"></div>
+        
+        <div className="relative border rounded-full hover:border-primary-500 transition-colors">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
             <svg className="h-4 w-4 text-primary-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -83,7 +108,7 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
             placeholder="Search Contacts..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full  rounded-full pl-10 pr-4 py-2 text-sm text-primary-50 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 transition-all placeholder-primary-50 "
+            className="w-full bg-transparent rounded-full pl-10 pr-4 py-2 text-sm text-primary-50 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 transition-all placeholder-primary-50"
           />
         </div>
       </div>
@@ -94,32 +119,35 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
             {contacts.length === 0 ? "Your secure vault is empty." : "No contacts found."}
           </div>
         ) : (
-          filteredContacts.map(contact => (
-            <button
-              key={contact.id}
-              onClick={() => setSelectedContact(contact)}
-              className={`w-full text-left px-3 py-3 rounded-full transition-all flex items-center gap-3 group ${
-                selectedContact?.id === contact.id 
-                  ? 'bg-primary-900 border border-primary-800' 
-                  : 'hover:bg-primary-900/50 border border-transparent'
-              }`}
-            >
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-primary-50 font-bold shadow-inner ${
-                 selectedContact?.id === contact.id ? 'bg-primary-600' : 'bg-primary-800 group-hover:bg-primary-700'
-              } transition-colors`}>
-                {contact.username.charAt(0).toUpperCase()}
-              </div>
-              <span className={`font-medium truncate ${selectedContact?.id === contact.id ? 'text-primary-50' : 'text-primary-50'}`}>
-                {contact.username}
-              </span>
-            </button>
-          ))
+          filteredContacts.map(contact => {
+            const contactColor = getContactColor(contact.username);
+            
+            return (
+              <button
+                key={contact.id}
+                onClick={() => setSelectedContact(contact)}
+                className={`w-full text-left px-3 py-3 rounded-full transition-all flex items-center gap-3 group ${
+                  selectedContact?.id === contact.id 
+                    ? 'bg-primary-900 border border-primary-800' 
+                    : 'hover:bg-primary-900/50 border border-transparent'
+                }`}
+              >
+                {/* 3. Apply the dynamic shade to the avatar circle */}
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-secondary-50 font-bold shadow-inner ${contactColor} transition-colors`}>
+                  {contact.username.charAt(0).toUpperCase()}
+                </div>
+                <span className={`font-medium truncate text-primary-50`}>
+                  {contact.username}
+                </span>
+              </button>
+            );
+          })
         )}
       </div>
 
       <div className="p-4 mt-auto">
-        {/* 4. Updated the glowing line to primary-500 */}
-        <div className="h-px w-full bg-linear-to-r from-transparent via-primary-500/50 to-transparent mb-4"></div>
+        {/* Updated line visibility to match ChatArea */}
+        <div className="h-px w-full bg-linear-to-r from-transparent via-primary-400/80 to-transparent mb-4"></div>
         <button 
           onClick={() => setIsAddModalOpen(true)}
           className="w-full bg-primary-900 hover:bg-primary-800 border border-primary-800 hover:border-primary-700 text-primary-50 font-semibold py-2.5 rounded-full transition-all text-sm"
@@ -130,7 +158,8 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
 
       {isAddModalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-primary-90 border border-primary-50 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+          {/* Fixed the bg-primary-90 typo here */}
+          <div className="bg-primary-950 border border-primary-50 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
             <h3 className="text-lg font-bold text-primary-50 mb-2">Add Secure Contact</h3>
             <p className="text-xs text-primary-50 mb-4">Enter your friend's exact username to exchange public keys and initiate a secure connection.</p>
             
@@ -144,14 +173,13 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
                 className="w-full bg-primary-950 border border-primary-50 rounded-lg px-4 py-2.5 text-sm text-primary-50 focus:outline-none focus:border-primary-500 mb-3"
               />
               
-              {/* 5. Used your secondary colors for the error state */}
               {addError && <div className="text-xs text-secondary-400 mb-3 bg-secondary-900/30 border border-secondary-800/50 p-2 rounded">{addError}</div>}
               
               <div className="flex gap-2 justify-end">
                 <button 
                   type="button" 
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 text-sm text-primary-50 hover:text-primary-50 transition-colors"
+                  className="px-4 py-2 text-sm text-primary-50 hover:text-primary-300 transition-colors"
                 >
                   Cancel
                 </button>
