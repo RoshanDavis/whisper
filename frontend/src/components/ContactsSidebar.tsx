@@ -70,7 +70,8 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
   return (
     <div className="w-1/3 max-w-sm h-full bg-primary-950 border border-primary-50 rounded-xl flex flex-col relative shrink-0 ml-5">
       <div className="p-4 flex flex-col gap-4">
-        <h2 className="text-primary-50 font-bold text-lg text-center tracking-wide">Contacts</h2>
+        <h2 className="text-primary-50 font-bold text-lg text-center mt-4 tracking-wide">Contacts</h2>
+        <div className="h-px w-full bg-linear-to-r from-transparent via-primary-500/50 to-transparent "></div>
         <div className="relative border rounded-full hover:border-primary-500">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
             <svg className="h-4 w-4 text-primary-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">

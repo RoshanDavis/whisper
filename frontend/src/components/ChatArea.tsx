@@ -132,7 +132,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
     return () => { socket.off('receiveMessage', handleReceive); };
   }, [socket, selectedContact, userId, currentUser]);
 
-  const handleSendMessage = async (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!inputText.trim() || !userId || !currentUser || !selectedContact || !socket) return;
 
@@ -173,35 +173,36 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
     }
   };
 
+  // UI: Empty State
   if (!selectedContact) {
     return (
-      <div className="flex-1 h-full bg-vault-base ml-0 flex flex-col items-center justify-center relative overflow-hidden rounded-2xl border border-gray-700/50 shadow-lg">
-        <div className="absolute top-0 left-0 w-full h-0.5 bg-linear-to-r from-brand to-emerald-500"></div>
-        <div className="w-16 h-16 rounded-full bg-vault-panel flex items-center justify-center mb-4 border border-gray-700">
-          <svg className="w-8 h-8 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <div className="flex-1 h-full bg-primary-950 ml-0 flex flex-col items-center justify-center relative overflow-hidden rounded-2xl border border-primary-50 shadow-lg mr-5">
+        <div className="w-16 h-16 rounded-full bg-primary-900 flex items-center justify-center mb-4 border border-primary-800">
+          <svg className="w-8 h-8 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>
         </div>
-        <h3 className="text-xl font-bold text-gray-300">Your Secure Vault</h3>
-        <p className="text-gray-500 text-sm mt-2 max-w-xs text-center">Select a contact to initiate an End-to-End Encrypted session.</p>
+        <h3 className="text-xl font-bold text-primary-50">Your Secure Vault</h3>
+        <p className="text-primary-400 text-sm mt-2 max-w-xs text-center">Select a contact to initiate an End-to-End Encrypted session.</p>
       </div>
     );
   }
 
+  // UI: Active Chat Session
   return (
-    <div className="flex-1 h-full bg-vault-base ml-0 flex flex-col relative overflow-hidden rounded-2xl border border-gray-700/50 shadow-lg">
-      <div className="absolute top-0 left-0 w-full h-0.5 bg-linear-to-r from-brand to-emerald-500 z-10"></div>
+    <div className="flex-1 h-full bg-primary-950 ml-0 flex flex-col relative overflow-hidden rounded-2xl border border-primary-50 shadow-lg mr-5"> 
       
-      <header className="px-6 py-4 bg-vault-panel/80 backdrop-blur-md border-b border-gray-700/50 flex items-center justify-between shrink-0 z-0">
+      {/* 1. Removed border-b from the header */}
+      <header className="px-6 py-4 bg-primary-950 backdrop-blur-md flex items-center justify-between shrink-0 z-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-white font-bold shadow-inner">
+          <div className="w-10 h-10 rounded-full bg-primary-800 flex items-center justify-center text-primary-50 font-bold shadow-inner border border-primary-700">
             {selectedContact.username.charAt(0).toUpperCase()}
           </div>
           <div>
-            <h2 className="font-bold text-gray-100">{selectedContact.username}</h2>
+            <h2 className="font-bold text-primary-50">{selectedContact.username}</h2>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-brand shadow-[0_0_5px_var(--color-brand)]"></span>
-              <span className="text-xs text-brand font-medium tracking-wide">E2EE Verified</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-primary-400 shadow-[0_0_5px_var(--color-primary-400)]"></span>
+              <span className="text-xs text-primary-400 font-medium tracking-wide">E2EE Verified</span>
             </div>
           </div>
         </div>
@@ -211,19 +212,22 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-gray-700 z-0">
+      {/* 2. Added the top separator line with margins */}
+      <div className="mx-6 h-px bg-linear-to-r from-transparent via-primary-500/50 to-transparent shrink-0"></div>
+
+      <div className="flex-1 overflow-y-auto p-6 space-y-6 z-0">
         {messages.length === 0 ? (
-          <div className="flex h-full items-center justify-center flex-col text-gray-500">
+          <div className="flex h-full items-center justify-center flex-col text-primary-400">
              <span className="mb-2">🔒</span>
              <p className="text-sm">Messages are end-to-end encrypted.</p>
-             <p className="text-xs mt-1">Nobody outside of this chat can read them.</p>
+             <p className="text-xs mt-1 text-primary-500">Nobody outside of this chat can read them.</p>
           </div>
         ) : (
           messages.map((msg) => (
             <div key={msg.id} className={`flex ${msg.isOwnMessage ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[70%] px-5 py-3 rounded-2xl shadow-sm ${
-                !msg.isVerified ? 'bg-red-900/50 text-red-200 border border-red-700 rounded-bl-none' :
-                msg.isOwnMessage ? 'bg-brand text-white rounded-br-none' : 'bg-vault-panel border border-gray-700/50 text-gray-100 rounded-bl-none'
+                !msg.isVerified ? 'bg-secondary-900/50 text-secondary-200 border border-secondary-700 rounded-bl-none' :
+                msg.isOwnMessage ? 'bg-primary-600 text-primary-50 rounded-br-none' : 'bg-primary-900 border border-primary-800 text-primary-50 rounded-bl-none'
               }`}>
                 {msg.text}
               </div>
@@ -233,19 +237,23 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      <footer className="p-4 bg-vault-panel/80 backdrop-blur-md border-t border-gray-700/50 shrink-0 z-0">
+      {/* 3. Added the bottom separator line with margins */}
+      <div className="mx-5 h-px bg-linear-to-r from-transparent via-primary-500/70 to-transparent shrink-0"></div>
+
+      {/* 4. Removed border-t from the footer */}
+      <footer className="p-4 bg-primary-950 backdrop-blur-md shrink-0 z-0">
         <form onSubmit={handleSendMessage} className="flex gap-3 max-w-5xl mx-auto">
           <input 
             type="text" 
             value={inputText} 
             onChange={(e) => setInputText(e.target.value)} 
-            placeholder="Type an encrypted message..." 
-            className="flex-1 bg-vault-base border border-gray-700 rounded-full px-6 py-3.5 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand transition-all placeholder-gray-500 text-gray-100 text-sm shadow-inner" 
+            placeholder="Type a message here..." 
+            className="flex-1 bg-primary-950 border border-primary-50 rounded-full px-6 py-3.5 focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500 transition-all placeholder-primary-50 text-primary-50 text-sm shadow-inner" 
           />
           <button 
             type="submit" 
             disabled={!inputText.trim()} 
-            className="bg-brand hover:bg-brand-hover disabled:bg-gray-700 disabled:text-gray-500 disabled:shadow-none text-white font-bold px-8 py-3.5 rounded-full transition-all shadow-[0_0_15px_var(--color-brand-glow)] flex items-center justify-center"
+            className="bg-primary-600 hover:bg-primary-500 disabled:shadow-none text-primary-50 font-bold px-8 py-3.5 rounded-full transition-all shadow-[0_0_15px_rgba(0,186,239,0.3)] flex items-center justify-center"
           >
             Send
           </button>
