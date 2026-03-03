@@ -1,22 +1,19 @@
 import { useState } from 'react';
 import Navbar from '../components/Navbar';
-import Sidebar from '../components/Sidebar';
-import ChatArea from '../components/ChatArea'; // <-- 1. Import it
+import Sidebar from '../components/ContactsSidebar';
+import ChatArea from '../components/ChatArea';
 
 export default function Chat() {
   const [selectedContact, setSelectedContact] = useState<any | null>(null);
 
   return (
-    <div className="flex flex-col h-screen bg-vault-base font-sans">
+    <div className="flex flex-col h-screen bg-primary-950 font-sans">
       <Navbar />
-      
-      <div className="flex flex-1 overflow-hidden h-full">
+      <div className="flex flex-1 overflow-hidden gap-3">
         <Sidebar 
           selectedContact={selectedContact} 
           setSelectedContact={setSelectedContact} 
         />
-        
-        {/* 2. Replace the placeholder with the real component! */}
         <ChatArea selectedContact={selectedContact} />
       </div>
     </div>

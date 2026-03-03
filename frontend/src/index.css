@@ -40,3 +40,20 @@ body {
   color: var(--color-primary-50);
   margin: 0;
 }
+
+/* =========================================
+   HIDE SCROLLBARS GLOBALLY (Keep Scrolling)
+   ========================================= */
+
+/* For Webkit browsers (Chrome, Safari, Edge) */
+::-webkit-scrollbar {
+  display: none; 
+  width: 0px;
+  background: transparent;
+}
+
+/* For Firefox and IE/Edge Legacy */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}

@@ -175,7 +175,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
 
   if (!selectedContact) {
     return (
-      <div className="flex-1 h-full bg-vault-base m-4 ml-0 flex flex-col items-center justify-center relative overflow-hidden rounded-2xl border border-gray-700/50 shadow-lg">
+      <div className="flex-1 h-full bg-vault-base ml-0 flex flex-col items-center justify-center relative overflow-hidden rounded-2xl border border-gray-700/50 shadow-lg">
         <div className="absolute top-0 left-0 w-full h-0.5 bg-linear-to-r from-brand to-emerald-500"></div>
         <div className="w-16 h-16 rounded-full bg-vault-panel flex items-center justify-center mb-4 border border-gray-700">
           <svg className="w-8 h-8 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -189,7 +189,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
   }
 
   return (
-    <div className="flex-1 h-full bg-vault-base m-4 ml-0 flex flex-col relative overflow-hidden rounded-2xl border border-gray-700/50 shadow-lg">
+    <div className="flex-1 h-full bg-vault-base ml-0 flex flex-col relative overflow-hidden rounded-2xl border border-gray-700/50 shadow-lg">
       <div className="absolute top-0 left-0 w-full h-0.5 bg-linear-to-r from-brand to-emerald-500 z-10"></div>
       
       <header className="px-6 py-4 bg-vault-panel/80 backdrop-blur-md border-b border-gray-700/50 flex items-center justify-between shrink-0 z-0">
