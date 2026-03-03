@@ -7,7 +7,7 @@ export default function Chat() {
   const [selectedContact, setSelectedContact] = useState<any | null>(null);
 
   return (
-    <div className="flex flex-col h-screen bg-[#0f172a] font-sans">
+    <div className="flex flex-col h-screen bg-vault-base font-sans">
       <Navbar />
       
       <div className="flex flex-1 overflow-hidden h-full">
