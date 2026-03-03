@@ -55,18 +55,17 @@ body {
 }
 
 /* =========================================
-   HIDE SCROLLBARS GLOBALLY (Keep Scrolling)
+   HIDE SCROLLBARS (Scoped to specific areas)
    ========================================= */
 
-/* For Webkit browsers (Chrome, Safari, Edge) */
-::-webkit-scrollbar {
-  display: none; 
+/* Apply .hide-scrollbar to containers that should hide scrollbars */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
   width: 0px;
   background: transparent;
 }
 
-/* For Firefox and IE/Edge Legacy */
-* {
+.hide-scrollbar {
   scrollbar-width: none; /* Firefox */
   -ms-overflow-style: none; /* IE and Edge */
 }

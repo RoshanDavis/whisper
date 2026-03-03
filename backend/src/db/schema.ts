@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, unique } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -46,4 +46,6 @@ export const contacts = pgTable('contacts', {
   contactId: uuid('contact_id').references(() => users.id).notNull(),
   
   createdAt: timestamp('created_at').defaultNow(),
-});
+}, (table) => [
+  unique('owner_contact_unique').on(table.ownerId, table.contactId),
+]);

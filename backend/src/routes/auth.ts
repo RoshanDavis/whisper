@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcrypt';
 import { eq, or, and } from 'drizzle-orm';
 import { db } from '../db/index';
@@ -6,6 +6,52 @@ import { users, messages, contacts } from '../db/schema';
 import jwt from 'jsonwebtoken';
 
 const router = express.Router();
+
+// ==========================================
+// JWT AUTH MIDDLEWARE
+// ==========================================
+interface AuthenticatedRequest extends Request {
+  user?: { userId: string; username: string };
+}
+
+function parseCookieToken(req: Request): string | undefined {
+  const cookieHeader = req.headers.cookie;
+  if (!cookieHeader) return undefined;
+  const match = cookieHeader.split(';').find(c => c.trim().startsWith('whisper_token='));
+  if (!match) return undefined;
+  return match.split('=').slice(1).join('=').trim();
+}
+
+const authenticateToken = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  // Try HttpOnly cookie first, then Authorization header as fallback
+  let token = parseCookieToken(req);
+
+  if (!token) {
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      token = authHeader.slice(7);
+    }
+  }
+
+  if (!token) {
+    res.status(401).json({ error: 'Authentication required.' });
+    return;
+  }
+
+  if (!process.env.JWT_SECRET) {
+    res.status(500).json({ error: 'Internal server configuration error.' });
+    return;
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET) as { userId: string; username: string };
+    req.user = decoded;
+    next();
+  } catch (err) {
+    res.status(403).json({ error: 'Invalid or expired token.' });
+    return;
+  }
+};
 
 router.post('/register', async (req, res) => {
   try {
@@ -92,6 +138,15 @@ router.post('/login', async (req, res) => {
       { expiresIn: '24h' }
     );
 
+    // Set HttpOnly cookie so the token is not accessible to client-side JS
+    res.cookie('whisper_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      path: '/',
+    });
+
     res.status(200).json({
       message: 'Login successful!',
       token,
@@ -116,6 +171,43 @@ router.post('/login', async (req, res) => {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Internal server error during login.' });
   }
+});
+
+// Session check: returns the authenticated user's info + encrypted key material
+router.get('/me', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const existingUser = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const user = existingUser[0];
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found.' });
+      return;
+    }
+
+    res.status(200).json({
+      user: {
+        id: user.id,
+        username: user.username,
+        publicKey: user.publicKey,
+        encryptedPrivateKey: user.encryptedPrivateKey,
+        keyIv: user.keyIv,
+        keySalt: user.keySalt,
+        publicSigningKey: user.publicSigningKey,
+        encryptedSigningPrivateKey: user.encryptedSigningPrivateKey,
+        signingKeyIv: user.signingKeyIv,
+      }
+    });
+  } catch (error) {
+    console.error('Session check error:', error);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// Logout: clear the HttpOnly cookie
+router.post('/logout', (_req, res) => {
+  res.clearCookie('whisper_token', { path: '/' });
+  res.status(200).json({ message: 'Logged out successfully.' });
 });
 
 // Fetch BOTH Public Keys (Encryption & Signing) by user ID
@@ -145,12 +237,14 @@ router.get('/users/:id/key', async (req, res) => {
 // ==========================================
 
 // 1. Add a new contact by exact username
-router.post('/contacts/add', async (req, res) => {
+router.post('/contacts/add', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { ownerId, contactUsername } = req.body;
+    const ownerId = req.user!.userId; // Use authenticated user's ID, not client-supplied
+    const { contactUsername } = req.body;
 
-    if (!ownerId || !contactUsername) {
-      return res.status(400).json({ error: 'Missing required fields.' });
+    if (!contactUsername) {
+      res.status(400).json({ error: 'Missing required fields.' });
+      return;
     }
 
     // Step A: Find the user they are trying to add
@@ -196,10 +290,10 @@ router.post('/contacts/add', async (req, res) => {
   }
 });
 
-// 2. Fetch a user's private contact list
-router.get('/contacts/:userId', async (req, res) => {
+// 2. Fetch the authenticated user's contact list
+router.get('/contacts', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { userId } = req.params;
+    const userId = req.user!.userId; // Use authenticated user's ID from JWT
 
     // We do an Inner Join here to get the friend's actual username and keys,
     // rather than just returning their UUID from the contacts table.

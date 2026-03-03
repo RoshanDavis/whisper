@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { getContactColor } from '../utils/contactColor';
 
 interface Contact {
   id: string;
@@ -13,28 +14,6 @@ interface ContactsSidebarProps {
   setSelectedContact: (contact: Contact) => void;
 }
 
-const getContactColor = (username: string) => {
-  const colors = [
-    'bg-contact-1',
-    'bg-contact-2',
-    'bg-contact-3',
-    'bg-contact-4',
-    'bg-contact-5',
-    'bg-contact-6',
-    'bg-contact-7',
-    'bg-contact-8',
-    'bg-contact-9',
-    'bg-contact-10',
-    'bg-contact-11',
-    'bg-contact-12'
-  ];
-  let hash = 0;
-  for (let i = 0; i < username.length; i++) {
-    hash = username.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return colors[Math.abs(hash) % colors.length];
-};
-
 export default function ContactsSidebar({ selectedContact, setSelectedContact }: ContactsSidebarProps) {
   const { userId } = useAuth();
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -47,17 +26,31 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
 
   useEffect(() => {
     if (!userId) return;
+    const controller = new AbortController();
+
     const fetchContacts = async () => {
       try {
-        const res = await fetch(`http://localhost:3000/api/auth/contacts/${userId}`);
+        const res = await fetch('/api/auth/contacts', {
+          credentials: 'include',
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
         if (!res.ok) throw new Error('Failed to fetch contacts');
         const data = await res.json();
-        setContacts(data);
-      } catch (err) {
-        console.error(err);
+        if (!controller.signal.aborted) {
+          setContacts(data);
+        }
+      } catch (err: any) {
+        if (err?.name !== 'AbortError') {
+          console.error(err);
+        }
       }
     };
     fetchContacts();
+
+    return () => {
+      controller.abort();
+    };
   }, [userId]);
 
   const handleAddContact = async (e: React.SyntheticEvent<HTMLFormElement>) => {
@@ -66,10 +59,11 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
     setIsAdding(true);
 
     try {
-      const res = await fetch('http://localhost:3000/api/auth/contacts/add', {
+      const res = await fetch('/api/auth/contacts/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ownerId: userId, contactUsername: newContactUsername }),
+        body: JSON.stringify({ contactUsername: newContactUsername }),
+        credentials: 'include',
       });
 
       const data = await res.json();
@@ -113,7 +107,7 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-2 space-y-1 scrollbar-thin scrollbar-thumb-primary-800">
+      <div className="flex-1 overflow-y-auto px-2 space-y-1 hide-scrollbar">
         {filteredContacts.length === 0 ? (
           <div className="text-center text-sm text-primary-50 mt-6 italic">
             {contacts.length === 0 ? "Your secure vault is empty." : "No contacts found."}

@@ -1,13 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useSocket } from "../contexts/SocketContext";
+import { getContactColor } from "../utils/contactColor";
 import {
-  importPrivateKey,
   importPublicKey,
   deriveSharedSecret,
   encryptMessage,
   decryptMessage,
-  importEcdsaPrivateKey,
   importEcdsaPublicKey,
   signData,
   verifySignature,
@@ -26,30 +25,8 @@ interface ChatAreaProps {
   selectedContact: any | null;
 }
 
-const getContactColor = (username: string) => {
-  const colors = [
-    "bg-contact-1",
-    "bg-contact-2",
-    "bg-contact-3",
-    "bg-contact-4",
-    "bg-contact-5",
-    "bg-contact-6",
-    "bg-contact-7",
-    "bg-contact-8",
-    "bg-contact-9",
-    "bg-contact-10",
-    "bg-contact-11",
-    "bg-contact-12",
-  ];
-  let hash = 0;
-  for (let i = 0; i < username.length; i++) {
-    hash = username.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return colors[Math.abs(hash) % colors.length];
-};
-
 export default function ChatArea({ selectedContact }: ChatAreaProps) {
-  const { currentUser, userId } = useAuth();
+  const { currentUser, userId, ecdhPrivateKey, ecdsaPrivateKey } = useAuth();
   const { socket, isConnected } = useSocket();
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -63,30 +40,36 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
 
   // FULLY RESTORED LOGIC
   useEffect(() => {
-    if (!selectedContact || !userId || !currentUser) return;
+    if (!selectedContact || !userId || !currentUser || !ecdhPrivateKey) return;
+
+    // Snapshot the current contact to detect stale responses
+    const contactId = selectedContact.id;
+    const controller = new AbortController();
 
     const loadHistory = async () => {
       try {
         const res = await fetch(
-          `http://localhost:3000/api/auth/messages/${userId}/${selectedContact.id}`,
+          `/api/auth/messages/${userId}/${contactId}`,
+          { credentials: 'include', signal: controller.signal },
         );
+        if (controller.signal.aborted) return;
         const encryptedHistory = await res.json();
 
-        const privKeyBase64 = localStorage.getItem(
-          `whisper_priv_${currentUser}`,
-        );
-        if (!privKeyBase64) throw new Error("Private key missing");
-        const privateKey = await importPrivateKey(privKeyBase64);
-
         const publicKey = await importPublicKey(selectedContact.publicKey);
+        if (controller.signal.aborted) return;
+
         const publicSigningKey = await importEcdsaPublicKey(
           selectedContact.publicSigningKey,
         );
+        if (controller.signal.aborted) return;
 
-        const sharedSecret = await deriveSharedSecret(privateKey, publicKey);
+        const sharedSecret = await deriveSharedSecret(ecdhPrivateKey, publicKey);
+        if (controller.signal.aborted) return;
+
         const decryptedMessages: Message[] = [];
 
         for (const msg of encryptedHistory) {
+          if (controller.signal.aborted) return;
           try {
             const isOwn = msg.senderId === userId;
             let isValid = true;
@@ -124,17 +107,27 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
             });
           }
         }
-        setMessages(decryptedMessages);
-      } catch (err) {
-        console.error("Failed to load history:", err);
+
+        // Only update state if this effect is still current
+        if (!controller.signal.aborted && selectedContact?.id === contactId) {
+          setMessages(decryptedMessages);
+        }
+      } catch (err: any) {
+        if (err?.name !== 'AbortError') {
+          console.error("Failed to load history:", err);
+        }
       }
     };
 
     loadHistory();
-  }, [selectedContact, userId, currentUser]);
+
+    return () => {
+      controller.abort();
+    };
+  }, [selectedContact, userId, currentUser, ecdhPrivateKey]);
 
   useEffect(() => {
-    if (!socket || !selectedContact || !userId || !currentUser) return;
+    if (!socket || !selectedContact || !userId || !currentUser || !ecdhPrivateKey) return;
 
     const handleReceive = async (savedMessage: any) => {
       if (
@@ -144,12 +137,6 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
         return;
 
       try {
-        const privKeyBase64 = localStorage.getItem(
-          `whisper_priv_${currentUser}`,
-        );
-        if (!privKeyBase64) throw new Error("Private key missing");
-
-        const privateKey = await importPrivateKey(privKeyBase64);
         const publicKey = await importPublicKey(selectedContact.publicKey);
         const publicSigningKey = await importEcdsaPublicKey(
           selectedContact.publicSigningKey,
@@ -163,7 +150,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
         if (!isValidSignature)
           throw new Error("SECURITY ALERT: Invalid signature!");
 
-        const sharedSecret = await deriveSharedSecret(privateKey, publicKey);
+        const sharedSecret = await deriveSharedSecret(ecdhPrivateKey, publicKey);
         const decryptedText = await decryptMessage(
           sharedSecret,
           savedMessage.ciphertext,
@@ -190,7 +177,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
     return () => {
       socket.off("receiveMessage", handleReceive);
     };
-  }, [socket, selectedContact, userId, currentUser]);
+  }, [socket, selectedContact, userId, currentUser, ecdhPrivateKey]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -212,7 +199,9 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
       !userId ||
       !currentUser ||
       !selectedContact ||
-      !socket
+      !socket ||
+      !ecdhPrivateKey ||
+      !ecdsaPrivateKey
     )
       return;
 
@@ -233,22 +222,14 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
     ]);
 
     try {
-      const privKeyBase64 = localStorage.getItem(`whisper_priv_${currentUser}`);
-      const signPrivKeyBase64 = localStorage.getItem(
-        `whisper_sign_priv_${currentUser}`,
-      );
-      if (!privKeyBase64 || !signPrivKeyBase64) throw new Error("Keys missing");
-
-      const privateKey = await importPrivateKey(privKeyBase64);
-      const signPrivateKey = await importEcdsaPrivateKey(signPrivKeyBase64);
       const publicKey = await importPublicKey(selectedContact.publicKey);
 
-      const sharedSecret = await deriveSharedSecret(privateKey, publicKey);
+      const sharedSecret = await deriveSharedSecret(ecdhPrivateKey, publicKey);
       const { ciphertext, iv } = await encryptMessage(
         sharedSecret,
         textToEncrypt,
       );
-      const signature = await signData(signPrivateKey, ciphertext);
+      const signature = await signData(ecdsaPrivateKey, ciphertext);
 
       socket.emit("sendMessage", {
         receiverId: selectedContact.id,
@@ -258,6 +239,8 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
       });
     } catch (err) {
       console.error("Send error:", err);
+      // Roll back the optimistic message on failure
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
     }
   };
 
@@ -324,7 +307,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
 
       <div className="mx-6 h-px bg-linear-to-r from-transparent via-primary-400/80 to-transparent shrink-0"></div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 z-0">
+      <div className="flex-1 overflow-y-auto p-6 space-y-6 z-0 hide-scrollbar">
         {messages.length === 0 ? (
           <div className="flex h-full items-center justify-center flex-col text-primary-400">
             <span className="mb-2">🔒</span>

@@ -5,7 +5,6 @@ import {
   deriveKeyFromPassword,
   unwrapPrivateKey,
   unwrapEcdsaPrivateKey,
-  exportPrivateKey,
   base64ToArrayBuffer
 } from '../utils/crypto';
 
@@ -27,10 +26,11 @@ export default function Login() {
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3000/api/auth/login', {
+      const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
+        credentials: 'include', // Accept HttpOnly cookie from server
       });
 
       const data = await response.json();
@@ -41,12 +41,13 @@ export default function Login() {
         const wrapperKey = await deriveKeyFromPassword(password, salt);
 
         const ecdhPrivateKey = await unwrapPrivateKey(data.user.encryptedPrivateKey, wrapperKey, data.user.keyIv);
-        localStorage.setItem(`whisper_priv_${username}`, await exportPrivateKey(ecdhPrivateKey));
-
         const ecdsaPrivateKey = await unwrapEcdsaPrivateKey(data.user.encryptedSigningPrivateKey, wrapperKey, data.user.signingKeyIv);
-        localStorage.setItem(`whisper_sign_priv_${username}`, await exportPrivateKey(ecdsaPrivateKey));
 
-        login(data.token, data.user.username, data.user.id);
+        // Use the server-confirmed username to avoid input/server mismatch
+        const canonicalUsername = data.user.username;
+
+        // Store CryptoKey objects in memory (via AuthContext), not in localStorage
+        login(canonicalUsername, data.user.id, ecdhPrivateKey, ecdsaPrivateKey);
         navigate('/');
 
       } catch (unwrapError) {

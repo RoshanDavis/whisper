@@ -7,17 +7,17 @@ import Settings from './pages/Settings';
 import About from './pages/About';
 
 export default function App() {
-  const { token } = useAuth();
+  const { isAuthenticated } = useAuth();
 
   return (
     <Routes>
-      <Route path="/login" element={!token ? <Login /> : <Navigate to="/" />} />
-      <Route path="/register" element={!token ? <Register /> : <Navigate to="/" />} />
-      <Route path="/" element={token ? <Chat /> : <Navigate to="/login" />} />
-      <Route path="/settings" element={token ? <Settings /> : <Navigate to="/login" />} />
-      <Route path="/about" element={token ? <About /> : <Navigate to="/login" />} />
+      <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/" replace />} />
+      <Route path="/register" element={!isAuthenticated ? <Register /> : <Navigate to="/" replace />} />
+      <Route path="/" element={isAuthenticated ? <Chat /> : <Navigate to="/login" replace />} />
+      <Route path="/settings" element={isAuthenticated ? <Settings /> : <Navigate to="/login" replace />} />
+      <Route path="/about" element={isAuthenticated ? <About /> : <Navigate to="/login" replace />} />
 
-      <Route path="*" element={<Navigate to="/" />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

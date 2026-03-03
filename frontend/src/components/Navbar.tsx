@@ -107,15 +107,22 @@ export default function Navbar() {
 
           <button
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className="w-8 h-8 rounded-full bg-primary-700 flex items-center justify-center text-white font-bold text-sm shadow-[0_0_10px_var(--color-brand-glow)] hover:ring-2 hover:ring-primary-300 transition-all focus:outline-none"
+            className="w-8 h-8 rounded-full bg-primary-700 flex items-center justify-center text-white font-bold text-sm shadow-[0_0_10px_var(--color-brand-glow)] hover:ring-2 hover:ring-primary-300 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
             aria-label="User menu"
+            aria-haspopup="menu"
+            aria-expanded={isDropdownOpen}
+            aria-controls="user-menu"
           >
             {currentUser?.charAt(0).toUpperCase()}
           </button>
         </div>
 
         {isDropdownOpen && (
-          <div className="absolute right-0 top-12 mt-2 w-48 bg-primary-950 border border-primary-50 rounded-xl shadow-lg py-2 z-50 overflow-hidden origin-top-right animate-in fade-in slide-in-from-top-2">
+          <div
+            id="user-menu"
+            role="menu"
+            className="absolute right-0 top-12 mt-2 w-48 bg-primary-950 border border-primary-50 rounded-xl shadow-lg py-2 z-50 overflow-hidden origin-top-right animate-in fade-in slide-in-from-top-2"
+          >
             <div className="px-4 py-2 border-b border-primary-50 mb-1">
               <p className="text-sm text-primary-50 font-medium truncate">
                 {currentUser}

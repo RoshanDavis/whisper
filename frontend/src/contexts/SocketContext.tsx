@@ -15,19 +15,22 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   
   // We grab the auth state so we only connect when a user is actually logged in
-  const { token, userId } = useAuth();
+  const { isAuthenticated, userId } = useAuth();
 
   useEffect(() => {
-    let newSocket: Socket;
+    let newSocket: Socket | null = null;
 
     // Only establish a connection if the user is fully authenticated
-    if (token && userId) {
-      newSocket = io('http://localhost:3000');
+    if (isAuthenticated && userId) {
+      const socketOrigin = import.meta.env.VITE_SOCKET_URL || window.location.origin;
+      newSocket = io(socketOrigin, {
+        withCredentials: true, // Send HttpOnly cookie with handshake
+      });
 
       newSocket.on('connect', () => {
         setIsConnected(true);
-        // The moment we connect, tell the backend who this socket belongs to
-        newSocket.emit('registerUser', userId);
+        // Tell the backend who this socket belongs to (server verifies via JWT cookie)
+        newSocket!.emit('registerUser', userId);
       });
 
       newSocket.on('disconnect', () => {
@@ -37,13 +40,15 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       setSocket(newSocket);
     }
 
-    // Cleanup function: If the user logs out or closes the app, sever the connection
+    // Cleanup: sever connection and reset state when auth changes or unmount
     return () => {
-      if (newSocket) {
-        newSocket.disconnect();
-      }
+      newSocket?.off('connect');
+      newSocket?.off('disconnect');
+      newSocket?.disconnect();
+      setSocket(null);
+      setIsConnected(false);
     };
-  }, [token, userId]); 
+  }, [isAuthenticated, userId]); 
 
   return (
     <SocketContext.Provider value={{ socket, isConnected }}>

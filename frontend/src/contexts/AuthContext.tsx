@@ -3,10 +3,12 @@ import { createContext, useContext, useState, type ReactNode } from 'react';
 
 // 1. Define the shape of our global authentication state
 interface AuthContextType {
-  token: string | null;
   currentUser: string | null;
   userId: string | null;
-  login: (token: string, username: string, userId: string) => void;
+  ecdhPrivateKey: CryptoKey | null;
+  ecdsaPrivateKey: CryptoKey | null;
+  isAuthenticated: boolean;
+  login: (username: string, userId: string, ecdhKey: CryptoKey, ecdsaKey: CryptoKey) => void;
   logout: () => void;
 }
 
@@ -15,46 +17,42 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // 3. Create the Provider component that will wrap our application
 export function AuthProvider({ children }: { children: ReactNode }) {
-  // Initialize state directly from localStorage so users stay logged in upon refresh
-  const [token, setToken] = useState<string | null>(localStorage.getItem('whisper_token'));
-  const [currentUser, setCurrentUser] = useState<string | null>(localStorage.getItem('whisper_username'));
-  const [userId, setUserId] = useState<string | null>(localStorage.getItem('whisper_userid'));
+  // Session state — no localStorage; keys live in memory only
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [ecdhPrivateKey, setEcdhPrivateKey] = useState<CryptoKey | null>(null);
+  const [ecdsaPrivateKey, setEcdsaPrivateKey] = useState<CryptoKey | null>(null);
 
-  const login = (newToken: string, username: string, newUserId: string) => {
-    localStorage.setItem('whisper_token', newToken);
-    localStorage.setItem('whisper_username', username);
-    localStorage.setItem('whisper_userid', newUserId);
-    
-    setToken(newToken);
+  // Fully authenticated = user info + crypto keys loaded
+  const isAuthenticated = currentUser !== null && userId !== null && ecdhPrivateKey !== null;
+
+  const login = (username: string, newUserId: string, ecdhKey: CryptoKey, ecdsaKey: CryptoKey) => {
     setCurrentUser(username);
     setUserId(newUserId);
+    setEcdhPrivateKey(ecdhKey);
+    setEcdsaPrivateKey(ecdsaKey);
   };
 
-  const logout = () => {
-    // Clear user identity
-    localStorage.removeItem('whisper_token');
-    localStorage.removeItem('whisper_username');
-    localStorage.removeItem('whisper_userid');
-    
-    // Security measure: Scrape the unwrapped private keys out of memory!
-    if (currentUser) {
-      localStorage.removeItem(`whisper_priv_${currentUser}`);
-      localStorage.removeItem(`whisper_sign_priv_${currentUser}`);
+  const logout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch (_err) {
+      // Best-effort: clear client state even if server call fails
     }
-
-    setToken(null);
     setCurrentUser(null);
     setUserId(null);
+    setEcdhPrivateKey(null);
+    setEcdsaPrivateKey(null);
   };
 
   return (
-    <AuthContext.Provider value={{ token, currentUser, userId, login, logout }}>
+    <AuthContext.Provider value={{ currentUser, userId, isAuthenticated, ecdhPrivateKey, ecdsaPrivateKey, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-// 4. Create a custom hook so our components can easily access this data
+// 4. Custom hook so our components can easily access this data
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
