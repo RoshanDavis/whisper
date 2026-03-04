@@ -39,7 +39,7 @@ The application uses the **ECDH** algorithm for asymmetric key exchange to agree
 * On login the JWT is set as an **HttpOnly, SameSite=Lax, Secure (in production)** cookie named `whisper_token`.
 * A reusable `authenticateToken` middleware in `auth.ts` parses the cookie (or `Authorization: Bearer` header as fallback) and attaches `req.user = { userId, username }` to all protected routes.
 * Socket.IO connections are authenticated by an `io.use(...)` middleware that verifies the JWT from the cookie/handshake auth before accepting the socket. The authenticated `userId` is stored on `socket.data.userId`. The `io` instance is also exposed to Express routes via `app.set('io', io)` so that the logout handler can disconnect the user's active sockets.
-* **Endpoints requiring auth:** `GET /api/auth/me`, `POST /api/auth/logout`, `GET /api/auth/contacts`, `POST /api/auth/contacts/add`, `GET /api/auth/messages/:user1/:user2`.
+* **Endpoints requiring auth:** `GET /api/auth/me`, `GET /api/auth/contacts`, `POST /api/auth/contacts/add`, `GET /api/auth/messages/:user1/:user2`.
 
 ### Frontend
 * `AuthContext` provides: `currentUser`, `userId`, `ecdhPrivateKey`, `ecdsaPrivateKey`, `isAuthenticated`, `login()`, `logout()`.

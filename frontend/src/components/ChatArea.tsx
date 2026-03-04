@@ -141,11 +141,15 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
 
     const handleReceive = async (savedMessage: any) => {
       if (!isActive) return;
-      if (
-        savedMessage.receiverId !== userId ||
-        savedMessage.senderId !== selectedContact.id
-      )
-        return;
+
+      // Accept messages belonging to this two-party conversation (either direction)
+      const isInbound =
+        savedMessage.senderId === selectedContact.id &&
+        savedMessage.receiverId === userId;
+      const isOwnEcho =
+        savedMessage.senderId === userId &&
+        savedMessage.receiverId === selectedContact.id;
+      if (!isInbound && !isOwnEcho) return;
 
       try {
         const publicKey = await importPublicKey(selectedContact.publicKey);
@@ -155,14 +159,17 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
         );
         if (!isActive) return;
 
-        const isValidSignature = await verifySignature(
-          publicSigningKey,
-          savedMessage.signature,
-          savedMessage.ciphertext,
-        );
-        if (!isActive) return;
-        if (!isValidSignature)
-          throw new Error("SECURITY ALERT: Invalid signature!");
+        // Only verify signature on messages from the contact (not our own echoes)
+        if (isInbound) {
+          const isValidSignature = await verifySignature(
+            publicSigningKey,
+            savedMessage.signature,
+            savedMessage.ciphertext,
+          );
+          if (!isActive) return;
+          if (!isValidSignature)
+            throw new Error("SECURITY ALERT: Invalid signature!");
+        }
 
         const sharedSecret = await deriveSharedSecret(ecdhPrivateKey, publicKey);
         if (!isActive) return;
@@ -173,31 +180,38 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
         );
         if (!isActive) return;
 
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: savedMessage.id,
-            text: decryptedText,
-            senderId: savedMessage.senderId,
-            receiverId: savedMessage.receiverId,
-            isOwnMessage: false,
-            isVerified: true,
-          },
-        ]);
+        setMessages((prev) => {
+          // Deduplicate: replace optimistic entry or skip if already present
+          if (prev.some((m) => m.id === savedMessage.id)) return prev;
+          return [
+            ...prev,
+            {
+              id: savedMessage.id,
+              text: decryptedText,
+              senderId: savedMessage.senderId,
+              receiverId: savedMessage.receiverId,
+              isOwnMessage: isOwnEcho,
+              isVerified: true,
+            },
+          ];
+        });
       } catch (err) {
         if (!isActive) return;
         console.error("Decryption failed:", err);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: savedMessage.id,
-            text: "\u26a0\ufe0f [Security Warning] Message could not be decrypted/verified",
-            senderId: savedMessage.senderId,
-            receiverId: savedMessage.receiverId,
-            isOwnMessage: false,
-            isVerified: false,
-          },
-        ]);
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === savedMessage.id)) return prev;
+          return [
+            ...prev,
+            {
+              id: savedMessage.id,
+              text: "\u26a0\ufe0f [Security Warning] Message could not be decrypted/verified",
+              senderId: savedMessage.senderId,
+              receiverId: savedMessage.receiverId,
+              isOwnMessage: isOwnEcho,
+              isVerified: false,
+            },
+          ];
+        });
       }
     };
 
