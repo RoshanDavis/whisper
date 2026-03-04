@@ -8,7 +8,7 @@ import jwt from 'jsonwebtoken';
 
 // Import our database and schema
 import { db } from './db/index';
-import { messages } from './db/schema';
+import { messages, conversations, contacts } from './db/schema';
 
 import authRoutes from './routes/auth';
 
@@ -97,26 +97,69 @@ io.on('connection', (socket) => {
          return;
       }
 
-      // 3. Save to Supabase using Drizzle
-      const savedMessage = await db.insert(messages).values({
-        senderId: senderId,
-        receiverId: data.receiverId,
-        ciphertext: data.ciphertext, 
-        iv: data.iv, 
-        signature: data.signature, // ---> NEW: Saving the ECDSA signature to the database!
-      }).returning();
+      // Canonical pair ordering: user1Id < user2Id (matches CHECK constraint)
+      const [user1Id, user2Id] = senderId < data.receiverId
+        ? [senderId, data.receiverId]
+        : [data.receiverId, senderId];
+
+      // Transactional write: insert message + upsert conversation in one atomic op
+      const savedMessage = await db.transaction(async (tx) => {
+        const [msg] = await tx.insert(messages).values({
+          senderId: senderId,
+          receiverId: data.receiverId,
+          ciphertext: data.ciphertext,
+          iv: data.iv,
+          signature: data.signature,
+        }).returning();
+
+        await tx
+          .insert(conversations)
+          .values({ user1Id, user2Id, lastMessageAt: msg.createdAt! })
+          .onConflictDoUpdate({
+            target: [conversations.user1Id, conversations.user2Id],
+            set: { lastMessageAt: msg.createdAt! },
+          });
+
+        return msg;
+      });
 
       console.log('✅ Encrypted and signed message saved to database!');
 
-      // 4. Send the saved message privately to sender and receiver
+      // Resolve connected sockets early so both auto-contact and broadcast can use them
       const senderSockets = connectedUsers.get(senderId);
       const receiverSockets = connectedUsers.get(data.receiverId);
+
+      // Auto-create a pending contact for the receiver so the sender appears in their inbox
+      try {
+        await db.insert(contacts).values({
+          ownerId: data.receiverId,
+          contactId: senderId,
+          status: 'pending',
+        });
+        // Notify receiver to refresh their inbox (new pending contact)
+        if (receiverSockets) {
+          for (const sid of receiverSockets) {
+            io.to(sid).emit('inboxUpdated');
+          }
+        }
+      } catch (err: any) {
+        // 23505 = unique violation → contact already exists, which is fine
+        if (err?.code !== '23505') {
+          console.error('Error auto-creating pending contact:', err);
+        }
+      }
+
+      // 4. Send the saved message privately to sender and receiver
+      // Skip the socket that sent the message (it already has an optimistic entry);
+      // other tabs of the same sender still receive the echo.
       if (senderSockets) {
-        for (const sid of senderSockets) io.to(sid).emit('receiveMessage', savedMessage[0]);
+        for (const sid of senderSockets) {
+          if (sid !== socket.id) io.to(sid).emit('receiveMessage', savedMessage);
+        }
       }
       if (receiverSockets) {
         for (const sid of receiverSockets) {
-          if (!senderSockets?.has(sid)) io.to(sid).emit('receiveMessage', savedMessage[0]);
+          io.to(sid).emit('receiveMessage', savedMessage);
         }
       }
 

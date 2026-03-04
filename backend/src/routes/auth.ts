@@ -1,8 +1,8 @@
 import express, { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcrypt';
-import { eq, or, and, asc } from 'drizzle-orm';
+import { eq, or, and, asc, desc, sql } from 'drizzle-orm';
 import { db } from '../db/index';
-import { users, messages, contacts } from '../db/schema';
+import { users, messages, contacts, conversations } from '../db/schema';
 import jwt from 'jsonwebtoken';
 
 const router = express.Router();
@@ -279,12 +279,16 @@ router.post('/contacts/add', authenticateToken, async (req: AuthenticatedRequest
       return res.status(400).json({ error: 'You cannot add yourself as a contact.' });
     }
 
-    // Step B+C: Insert the contact, relying on the UNIQUE constraint to prevent duplicates
+    // Step B+C: Insert or upgrade to 'accepted' if it was pending
     try {
-      await db.insert(contacts).values({ ownerId, contactId });
+      await db.insert(contacts).values({ ownerId, contactId, status: 'accepted' })
+        .onConflictDoUpdate({
+          target: [contacts.ownerId, contacts.contactId],
+          set: { status: 'accepted' },
+        });
     } catch (err: any) {
-      // Postgres unique-violation (23505) or our named constraint
-      if (err?.code === '23505' || err?.constraint === 'owner_contact_unique') {
+      // Unexpected DB error (unique violations are handled by onConflictDoUpdate)
+      if (err?.code === '23505') {
         return res.status(409).json({ error: 'This user is already in your contacts.' });
       }
       throw err; // re-throw unexpected errors to be caught by the outer catch
@@ -336,10 +340,107 @@ router.get('/contacts', authenticateToken, async (req: AuthenticatedRequest, res
 // Strict UUID v4 format check
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// 3. Unified Inbox: contacts enriched with last-activity timestamps from conversations
+router.get('/inbox', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+
+    // Fetch all contacts for the user, LEFT-joining conversations to get lastMessageAt.
+    // Conversations are keyed by canonically-ordered (user1Id < user2Id) pairs.
+    const inboxRows = await db
+      .select({
+        id: users.id,
+        username: users.username,
+        publicKey: users.publicKey,
+        publicSigningKey: users.publicSigningKey,
+        lastActive: conversations.lastMessageAt,
+        status: contacts.status,
+      })
+      .from(contacts)
+      .innerJoin(users, eq(contacts.contactId, users.id))
+      .leftJoin(
+        conversations,
+        or(
+          and(
+            eq(conversations.user1Id, contacts.ownerId),
+            eq(conversations.user2Id, contacts.contactId)
+          ),
+          and(
+            eq(conversations.user1Id, contacts.contactId),
+            eq(conversations.user2Id, contacts.ownerId)
+          )
+        )
+      )
+      .where(eq(contacts.ownerId, userId))
+      .orderBy(desc(conversations.lastMessageAt));
+
+    res.status(200).json(inboxRows);
+  } catch (error) {
+    console.error('Error fetching inbox:', error);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// 4. Accept a pending contact request
+router.patch('/contacts/:contactId/accept', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const ownerId = req.user!.userId;
+    const contactId = req.params.contactId as string;
+
+    if (!UUID_RE.test(contactId)) {
+      res.status(400).json({ error: 'Invalid contact id.' });
+      return;
+    }
+
+    const updated = await db.update(contacts)
+      .set({ status: 'accepted' })
+      .where(and(eq(contacts.ownerId, ownerId), eq(contacts.contactId, contactId)))
+      .returning();
+
+    if (updated.length === 0) {
+      res.status(404).json({ error: 'Contact not found.' });
+      return;
+    }
+
+    res.status(200).json({ message: 'Contact accepted.' });
+  } catch (error) {
+    console.error('Error accepting contact:', error);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// 5. Remove / reject a contact
+router.delete('/contacts/:contactId', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const ownerId = req.user!.userId;
+    const contactId = req.params.contactId as string;
+
+    if (!UUID_RE.test(contactId)) {
+      res.status(400).json({ error: 'Invalid contact id.' });
+      return;
+    }
+
+    const deleted = await db.delete(contacts)
+      .where(and(eq(contacts.ownerId, ownerId), eq(contacts.contactId, contactId)))
+      .returning();
+
+    if (deleted.length === 0) {
+      res.status(404).json({ error: 'Contact not found.' });
+      return;
+    }
+
+    res.status(200).json({ message: 'Contact removed.' });
+  } catch (error) {
+    console.error('Error removing contact:', error);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // Fetch chat history between two specific users
 router.get('/messages/:user1/:user2', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { user1, user2 } = req.params;
+    const user1 = req.params.user1 as string;
+    const user2 = req.params.user2 as string;
 
     if (!UUID_RE.test(user1) || !UUID_RE.test(user2)) {
       res.status(400).json({ error: 'Invalid user id.' });

@@ -1,0 +1,1 @@
+ALTER TABLE "contacts" ADD COLUMN "status" text DEFAULT 'accepted' NOT NULL;
