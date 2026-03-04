@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, unique } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -33,3 +33,19 @@ export const messages = pgTable('messages', {
   
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+// Add this to the bottom of backend/src/db/schema.ts
+
+export const contacts = pgTable('contacts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  
+  // The person who owns the contact list
+  ownerId: uuid('owner_id').references(() => users.id).notNull(),
+  
+  // The friend they are adding
+  contactId: uuid('contact_id').references(() => users.id).notNull(),
+  
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => [
+  unique('owner_contact_unique').on(table.ownerId, table.contactId),
+]);

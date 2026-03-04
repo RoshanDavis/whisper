@@ -1,1 +1,71 @@
 @import "tailwindcss";
+
+/* This is how we inject our custom brand colors in v4! */
+@theme {
+  --color-vault-base: #0f172a;
+  --color-vault-panel: #1e293b;
+  --color-vault-highlight: #273549;
+  
+  --color-brand: #0ea5e9;
+  --color-brand-hover: #0284c7;
+  --color-brand-glow: rgba(14, 165, 233, 0.3);
+
+  --color-primary-50: #e9feff;
+  --color-primary-100: #c9fcff;
+  --color-primary-200: #99f6ff;
+  --color-primary-300: #54ecff;
+  --color-primary-400: #07d7ff;
+  --color-primary-500: #00baef;
+  --color-primary-600: #0092c9;
+  --color-primary-700: #0074a1;
+  --color-primary-800: #085d82;
+  --color-primary-900: #0c4d6d;
+  --color-primary-950: #00111a;
+
+  --color-secondary-50: #fef3f2;
+  --color-secondary-100: #ffe4e1;
+  --color-secondary-200: #ffcec8;
+  --color-secondary-300: #ffaca2;
+  --color-secondary-400: #fc7d6d;
+  --color-secondary-500: #f4533f;
+  --color-secondary-600: #e13621;
+  --color-secondary-700: #be2917;
+  --color-secondary-800: #9d2617;
+  --color-secondary-900: #82251a;
+  --color-secondary-950: #470f08;
+
+  --color-contact-1: #e11d48; /* Vibrant Crimson */
+  --color-contact-2: #059669; /* Deep Emerald */
+  --color-contact-3: #d97706; /* Rich Amber */
+  --color-contact-4: #7c3aed; /* Electric Violet */
+  --color-contact-5: #db2777; /* Bold Pink */
+  --color-contact-6: #ea580c; /* Bright Orange */
+  --color-contact-7: #65a30d; /* Vibrant Lime */
+  --color-contact-8: #c026d3; /* Deep Fuchsia */
+  --color-contact-9: #4f46e5; /* Rich Indigo */
+  --color-contact-10: #0d9488; /* Deep Teal */
+  --color-contact-11: #b91c1c; /* Brick Red */
+  --color-contact-12: #9333ea; /* Royal Purple */ 
+}
+
+body {
+  background-color: var(--color-primary-950);
+  color: var(--color-primary-50);
+  margin: 0;
+}
+
+/* =========================================
+   HIDE SCROLLBARS (Scoped to specific areas)
+   ========================================= */
+
+/* Apply .hide-scrollbar to containers that should hide scrollbars */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0px;
+  background: transparent;
+}
+
+.hide-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
