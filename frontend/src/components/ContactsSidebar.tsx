@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSocket } from '../contexts/SocketContext';
 import { getContactColor } from '../utils/contactColor';
 
 export interface Contact {
@@ -7,6 +8,8 @@ export interface Contact {
   username: string;
   publicKey: string;
   publicSigningKey: string;
+  lastActive?: string | null;
+  status?: 'accepted' | 'pending';
 }
 
 interface ContactsSidebarProps {
@@ -16,6 +19,7 @@ interface ContactsSidebarProps {
 
 export default function ContactsSidebar({ selectedContact, setSelectedContact }: ContactsSidebarProps) {
   const { userId } = useAuth();
+  const { socket } = useSocket();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -30,34 +34,75 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
     setIsAdding(false);
   };
 
+  const fetchInbox = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const res = await fetch('/api/auth/inbox', {
+        credentials: 'include',
+        signal,
+      });
+      if (signal?.aborted) return;
+      if (!res.ok) throw new Error('Failed to fetch inbox');
+      const data = await res.json();
+      if (!signal?.aborted) {
+        setContacts(data);
+      }
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        console.error(err);
+      }
+    }
+  }, []);
+
+  // Initial fetch
   useEffect(() => {
     if (!userId) return;
     const controller = new AbortController();
+    fetchInbox(controller.signal);
+    return () => { controller.abort(); };
+  }, [userId, fetchInbox]);
 
-    const fetchContacts = async () => {
-      try {
-        const res = await fetch('/api/auth/contacts', {
-          credentials: 'include',
-          signal: controller.signal,
-        });
-        if (controller.signal.aborted) return;
-        if (!res.ok) throw new Error('Failed to fetch contacts');
-        const data = await res.json();
-        if (!controller.signal.aborted) {
-          setContacts(data);
-        }
-      } catch (err: any) {
-        if (err?.name !== 'AbortError') {
-          console.error(err);
-        }
-      }
-    };
-    fetchContacts();
-
+  // Re-fetch inbox when a new message arrives (updates lastActive ordering)
+  useEffect(() => {
+    if (!socket) return;
+    const handleReceiveMessage = () => { fetchInbox(); };
+    const handleInboxUpdated = () => { fetchInbox(); };
+    socket.on('receiveMessage', handleReceiveMessage);
+    socket.on('inboxUpdated', handleInboxUpdated);
     return () => {
-      controller.abort();
+      socket.off('receiveMessage', handleReceiveMessage);
+      socket.off('inboxUpdated', handleInboxUpdated);
     };
-  }, [userId]);
+  }, [socket, fetchInbox]);
+
+  const handleAcceptContact = async (contactId: string) => {
+    try {
+      const res = await fetch(`/api/auth/contacts/${contactId}/accept`, {
+        method: 'PATCH',
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to accept');
+      await fetchInbox();
+    } catch (err) {
+      console.error('Error accepting contact:', err);
+    }
+  };
+
+  const handleRejectContact = async (contactId: string) => {
+    try {
+      const res = await fetch(`/api/auth/contacts/${contactId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to remove');
+      // If the rejected contact was selected, deselect them
+      if (selectedContact?.id === contactId) {
+        setSelectedContact(null as any);
+      }
+      await fetchInbox();
+    } catch (err) {
+      console.error('Error rejecting contact:', err);
+    }
+  };
 
   const handleAddContact = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -79,7 +124,8 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to add contact');
 
-      setContacts((prev) => [...prev, data.contact]);
+      // Re-fetch inbox to get the new contact with proper ordering
+      await fetchInbox();
       setIsAddModalOpen(false);
       resetAddContactModal();
     } catch (err: any) {
@@ -125,32 +171,60 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
         ) : (
           filteredContacts.map(contact => {
             const contactColor = getContactColor(contact.username);
+            const isPending = contact.status === 'pending';
             
             return (
-              <button
+              <div
                 key={contact.id}
-                onClick={() => setSelectedContact(contact)}
                 className={`w-full text-left px-3 py-3 rounded-full transition-all flex items-center gap-3 group ${
                   selectedContact?.id === contact.id 
                     ? 'bg-primary-900 border border-primary-800' 
                     : 'hover:bg-primary-900/50 border border-transparent'
-                }`}
+                } ${isPending ? 'opacity-80' : ''}`}
               >
-                {/* 3. Apply the dynamic shade to the avatar circle */}
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-secondary-50 font-bold shadow-inner ${contactColor} transition-colors`}>
-                  {contact.username.charAt(0).toUpperCase()}
-                </div>
-                <span className={`font-medium truncate text-primary-50`}>
-                  {contact.username}
-                </span>
-              </button>
+                <button
+                  onClick={() => setSelectedContact(contact)}
+                  className="flex items-center gap-3 flex-1 min-w-0"
+                >
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-secondary-50 font-bold shadow-inner ${contactColor} transition-colors shrink-0`}>
+                    {contact.username.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex justify-between">
+                    <span className="font-medium truncate text-primary-50 block">
+                      {contact.username}
+                    </span>
+                  </div>
+                </button>
+
+                {isPending && (
+                  <div className="flex gap-1 shrink-0">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleAcceptContact(contact.id); }}
+                      title="Accept contact"
+                      className="w-8 h-8 rounded-full flex items-center justify-center bg-primary-700/30 hover:bg-primary-600/50 text-primary-400 hover:text-green-300 transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleRejectContact(contact.id); }}
+                      title="Remove contact"
+                      className="w-8 h-8 rounded-full flex items-center justify-center bg-secondary-700/30 hover:bg-secondary-600/50 text-secondary-400 hover:text-secondary-300 transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+              </div>
             );
           })
         )}
       </div>
 
       <div className="p-4 mt-auto">
-        {/* Updated line visibility to match ChatArea */}
         <div className="h-px w-full bg-linear-to-r from-transparent via-primary-400/80 to-transparent mb-4"></div>
         <button 
           onClick={() => { resetAddContactModal(); setIsAddModalOpen(true); }}
@@ -162,7 +236,6 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
 
       {isAddModalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          {/* Fixed the bg-primary-90 typo here */}
           <div className="bg-primary-950 border border-primary-50 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
             <h3 className="text-lg font-bold text-primary-50 mb-2">Add Secure Contact</h3>
             <p className="text-xs text-primary-50 mb-4">Enter your friend's exact username to exchange public keys and initiate a secure connection.</p>
