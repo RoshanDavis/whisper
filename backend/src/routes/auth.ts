@@ -1,6 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcrypt';
-import { eq, or, and } from 'drizzle-orm';
+import { eq, or, and, asc } from 'drizzle-orm';
 import { db } from '../db/index';
 import { users, messages, contacts } from '../db/schema';
 import jwt from 'jsonwebtoken';
@@ -149,7 +149,6 @@ router.post('/login', async (req, res) => {
 
     res.status(200).json({
       message: 'Login successful!',
-      token,
       user: {
         id: user.id,
         username: user.username,
@@ -204,8 +203,26 @@ router.get('/me', authenticateToken, async (req: AuthenticatedRequest, res: Resp
   }
 });
 
-// Logout: clear the HttpOnly cookie
-router.post('/logout', (_req, res) => {
+// Logout: clear the HttpOnly cookie and disconnect active sockets
+router.post('/logout', (req, res) => {
+  // Identify the user from the cookie so we can disconnect their sockets
+  const token = parseCookieToken(req);
+  if (token && process.env.JWT_SECRET) {
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET) as { userId: string };
+      const io = req.app.get('io');
+      if (io) {
+        for (const [, socket] of io.sockets.sockets) {
+          if (socket.data.userId === decoded.userId) {
+            socket.disconnect(true);
+          }
+        }
+      }
+    } catch (_) {
+      // Token invalid/expired — no active sockets to disconnect
+    }
+  }
+
   res.clearCookie('whisper_token', { path: '/' });
   res.status(200).json({ message: 'Logged out successfully.' });
 });
@@ -260,17 +277,16 @@ router.post('/contacts/add', authenticateToken, async (req: AuthenticatedRequest
       return res.status(400).json({ error: 'You cannot add yourself as a contact.' });
     }
 
-    // Step B: Prevent duplicate contacts
-    const existingContact = await db.select().from(contacts).where(
-      and(eq(contacts.ownerId, ownerId), eq(contacts.contactId, contactId))
-    ).limit(1);
-
-    if (existingContact.length > 0) {
-      return res.status(409).json({ error: 'This user is already in your contacts.' });
+    // Step B+C: Insert the contact, relying on the UNIQUE constraint to prevent duplicates
+    try {
+      await db.insert(contacts).values({ ownerId, contactId });
+    } catch (err: any) {
+      // Postgres unique-violation (23505) or our named constraint
+      if (err?.code === '23505' || err?.constraint === 'owner_contact_unique') {
+        return res.status(409).json({ error: 'This user is already in your contacts.' });
+      }
+      throw err; // re-throw unexpected errors to be caught by the outer catch
     }
-
-    // Step C: Save the relationship
-    await db.insert(contacts).values({ ownerId, contactId });
 
     // Step D: Return the friend's info (including their public keys!) 
     // so the React UI can update immediately
@@ -335,7 +351,8 @@ router.get('/messages/:user1/:user2', authenticateToken, async (req: Authenticat
           and(eq(messages.senderId, user1), eq(messages.receiverId, user2)),
           and(eq(messages.senderId, user2), eq(messages.receiverId, user1))
         )
-      );
+      )
+      .orderBy(asc(messages.createdAt), asc(messages.id));
     
     res.status(200).json(chatHistory);
   } catch (error) {

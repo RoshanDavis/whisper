@@ -56,13 +56,17 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
   const handleAddContact = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     setAddError('');
+
+    const trimmedUsername = newContactUsername.trim();
+    if (!trimmedUsername) return;
+
     setIsAdding(true);
 
     try {
       const res = await fetch('/api/auth/contacts/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contactUsername: newContactUsername }),
+        body: JSON.stringify({ contactUsername: trimmedUsername }),
         credentials: 'include',
       });
 

@@ -43,6 +43,9 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
   useEffect(() => {
     if (!selectedContact || !userId || !currentUser || !ecdhPrivateKey) return;
 
+    // Clear stale messages from previous contact immediately
+    setMessages([]);
+
     // Snapshot the current contact to detect stale responses
     const contactId = selectedContact.id;
     const controller = new AbortController();
@@ -54,6 +57,10 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
           { credentials: 'include', signal: controller.signal },
         );
         if (controller.signal.aborted) return;
+        if (!res.ok) {
+          console.error(`Failed to load history: ${res.status}`);
+          return;
+        }
         const encryptedHistory = await res.json();
 
         const publicKey = await importPublicKey(selectedContact.publicKey);
@@ -130,7 +137,10 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
   useEffect(() => {
     if (!socket || !selectedContact || !userId || !currentUser || !ecdhPrivateKey) return;
 
+    let isActive = true;
+
     const handleReceive = async (savedMessage: any) => {
+      if (!isActive) return;
       if (
         savedMessage.receiverId !== userId ||
         savedMessage.senderId !== selectedContact.id
@@ -139,24 +149,29 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
 
       try {
         const publicKey = await importPublicKey(selectedContact.publicKey);
+        if (!isActive) return;
         const publicSigningKey = await importEcdsaPublicKey(
           selectedContact.publicSigningKey,
         );
+        if (!isActive) return;
 
         const isValidSignature = await verifySignature(
           publicSigningKey,
           savedMessage.signature,
           savedMessage.ciphertext,
         );
+        if (!isActive) return;
         if (!isValidSignature)
           throw new Error("SECURITY ALERT: Invalid signature!");
 
         const sharedSecret = await deriveSharedSecret(ecdhPrivateKey, publicKey);
+        if (!isActive) return;
         const decryptedText = await decryptMessage(
           sharedSecret,
           savedMessage.ciphertext,
           savedMessage.iv,
         );
+        if (!isActive) return;
 
         setMessages((prev) => [
           ...prev,
@@ -170,6 +185,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
           },
         ]);
       } catch (err) {
+        if (!isActive) return;
         console.error("Decryption failed:", err);
         setMessages((prev) => [
           ...prev,
@@ -187,6 +203,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
 
     socket.on("receiveMessage", handleReceive);
     return () => {
+      isActive = false;
       socket.off("receiveMessage", handleReceive);
     };
   }, [socket, selectedContact, userId, currentUser, ecdhPrivateKey]);
@@ -370,7 +387,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
             placeholder="Type a message here..."
             rows={1}
             // Your existing Tailwind classes will handle the max height perfectly
-            className="flex-1 bg-primary-950 border border-primary-50 rounded-3xl px-6 py-3 focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500 transition-all placeholder-primary-50 text-primary-50 text-sm shadow-inner resize-none min-h-11.5 max-h-32 overflow-y-auto"
+            className="flex-1 bg-primary-950 border border-primary-50 rounded-3xl px-6 py-3 focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500 transition-all placeholder-primary-50 text-primary-50 text-sm shadow-inner resize-none min-h-11.5 max-h-32 overflow-y-auto hide-scrollbar"
           />
           <button
             type="submit"

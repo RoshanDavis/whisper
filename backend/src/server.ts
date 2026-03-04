@@ -36,6 +36,9 @@ app.get('/', (req, res) => {
   res.send('Whisper Backend is running securely!');
 });
 
+// Expose io to route handlers via req.app.get('io')
+app.set('io', io);
+
 // A temporary map to link a user's Database ID to their current Socket connection
 const connectedUsers = new Map<string, string>();
 
