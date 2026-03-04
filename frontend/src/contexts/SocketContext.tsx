@@ -22,8 +22,8 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     // Only establish a connection if the user is fully authenticated
     if (isAuthenticated && userId) {
-      const socketOrigin = import.meta.env.VITE_SOCKET_URL || window.location.origin;
-      newSocket = io(socketOrigin, {
+      const socketUrl = import.meta.env.VITE_API_URL || undefined;
+      newSocket = io(socketUrl, {
         withCredentials: true, // Send HttpOnly cookie with handshake
       });
 

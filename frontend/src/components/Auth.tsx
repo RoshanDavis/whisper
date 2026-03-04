@@ -11,6 +11,7 @@ import {
   generateEcdsaKeyPair,    // <-- NEW
   unwrapEcdsaPrivateKey    // <-- NEW
 } from '../utils/crypto';
+import API_URL from '../utils/api';
 
 interface AuthProps {
   onAuthSuccess: (token: string, username: string, userId: string) => void;
@@ -60,7 +61,7 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
 
       const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
       
-      const response = await fetch(`http://localhost:3000${endpoint}`, {
+      const response = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

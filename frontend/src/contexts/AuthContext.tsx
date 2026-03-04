@@ -1,5 +1,6 @@
 // frontend/src/contexts/AuthContext.tsx
 import { createContext, useContext, useState, type ReactNode } from 'react';
+import API_URL from '../utils/api';
 
 // 1. Define the shape of our global authentication state
 interface AuthContextType {
@@ -35,7 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      await fetch(`${API_URL}/api/auth/logout`, { method: 'POST', credentials: 'include' });
     } catch (_err) {
       // Best-effort: clear client state even if server call fails
     }

@@ -7,6 +7,7 @@ import {
   unwrapEcdsaPrivateKey,
   base64ToArrayBuffer
 } from '../utils/crypto';
+import API_URL from '../utils/api';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -26,7 +27,7 @@ export default function Login() {
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/auth/login', {
+      const response = await fetch(`${API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),

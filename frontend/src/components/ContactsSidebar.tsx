@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import { getContactColor } from '../utils/contactColor';
+import API_URL from '../utils/api';
 
 export interface Contact {
   id: string;
@@ -36,7 +37,7 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
 
   const fetchInbox = useCallback(async (signal?: AbortSignal) => {
     try {
-      const res = await fetch('/api/auth/inbox', {
+      const res = await fetch(`${API_URL}/api/auth/inbox`, {
         credentials: 'include',
         signal,
       });
@@ -76,7 +77,7 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
 
   const handleAcceptContact = async (contactId: string) => {
     try {
-      const res = await fetch(`/api/auth/contacts/${contactId}/accept`, {
+      const res = await fetch(`${API_URL}/api/auth/contacts/${contactId}/accept`, {
         method: 'PATCH',
         credentials: 'include',
       });
@@ -89,7 +90,7 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
 
   const handleRejectContact = async (contactId: string) => {
     try {
-      const res = await fetch(`/api/auth/contacts/${contactId}`, {
+      const res = await fetch(`${API_URL}/api/auth/contacts/${contactId}`, {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -114,7 +115,7 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
     setIsAdding(true);
 
     try {
-      const res = await fetch('/api/auth/contacts/add', {
+      const res = await fetch(`${API_URL}/api/auth/contacts/add`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contactUsername: trimmedUsername }),

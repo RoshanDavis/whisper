@@ -8,6 +8,7 @@ import {
   wrapPrivateKey,
   arrayBufferToBase64
 } from '../utils/crypto';
+import API_URL from '../utils/api';
 
 export default function Register() {
   const navigate = useNavigate();
@@ -43,7 +44,7 @@ export default function Register() {
         signingKeyIv: ecdsaWrapped.ivBase64
       };
 
-      const response = await fetch('/api/auth/register', {
+      const response = await fetch(`${API_URL}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
