@@ -237,7 +237,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
     const textToEncrypt = inputText;
     setInputText("");
 
-    const tempId = Date.now().toString();
+    const tempId = crypto.randomUUID();
     setMessages((prev) => [
       ...prev,
       {

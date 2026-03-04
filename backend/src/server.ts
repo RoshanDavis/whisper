@@ -39,8 +39,8 @@ app.get('/', (req, res) => {
 // Expose io to route handlers via req.app.get('io')
 app.set('io', io);
 
-// A temporary map to link a user's Database ID to their current Socket connection
-const connectedUsers = new Map<string, string>();
+// Map each userId to a Set of active socket IDs (supports multi-tab / reconnect)
+const connectedUsers = new Map<string, Set<string>>();
 
 // Socket.IO authentication middleware: verify JWT before allowing connection
 io.use((socket, next) => {
@@ -76,7 +76,8 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
   const userId = socket.data.userId as string;
-  connectedUsers.set(userId, socket.id);
+  if (!connectedUsers.has(userId)) connectedUsers.set(userId, new Set());
+  connectedUsers.get(userId)!.add(socket.id);
   console.log(`🔌 User ${userId} connected on socket ${socket.id}`);
 
   // Keep registerUser for backward compat but ignore the userId param (use authenticated one)
@@ -108,10 +109,16 @@ io.on('connection', (socket) => {
       console.log('✅ Encrypted and signed message saved to database!');
 
       // 4. Send the saved message privately to sender and receiver
-      const senderSocketId = connectedUsers.get(senderId);
-      const receiverSocketId = connectedUsers.get(data.receiverId);
-      if (senderSocketId) io.to(senderSocketId).emit('receiveMessage', savedMessage[0]);
-      if (receiverSocketId && receiverSocketId !== senderSocketId) io.to(receiverSocketId).emit('receiveMessage', savedMessage[0]);
+      const senderSockets = connectedUsers.get(senderId);
+      const receiverSockets = connectedUsers.get(data.receiverId);
+      if (senderSockets) {
+        for (const sid of senderSockets) io.to(sid).emit('receiveMessage', savedMessage[0]);
+      }
+      if (receiverSockets) {
+        for (const sid of receiverSockets) {
+          if (!senderSockets?.has(sid)) io.to(sid).emit('receiveMessage', savedMessage[0]);
+        }
+      }
 
     } catch (error) {
       console.error('❌ Error saving message to database:', error);
@@ -120,7 +127,11 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log(`🔴 Connection closed: ${socket.id}`);
-    connectedUsers.delete(userId); // Clean up memory when they leave
+    const sockets = connectedUsers.get(userId);
+    if (sockets) {
+      sockets.delete(socket.id);
+      if (sockets.size === 0) connectedUsers.delete(userId);
+    }
   });
 });
 

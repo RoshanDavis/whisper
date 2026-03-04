@@ -24,6 +24,12 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
   const [addError, setAddError] = useState('');
   const [isAdding, setIsAdding] = useState(false);
 
+  const resetAddContactModal = () => {
+    setNewContactUsername('');
+    setAddError('');
+    setIsAdding(false);
+  };
+
   useEffect(() => {
     if (!userId) return;
     const controller = new AbortController();
@@ -75,7 +81,7 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
 
       setContacts((prev) => [...prev, data.contact]);
       setIsAddModalOpen(false);
-      setNewContactUsername('');
+      resetAddContactModal();
     } catch (err: any) {
       setAddError(err.message);
     } finally {
@@ -147,7 +153,7 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
         {/* Updated line visibility to match ChatArea */}
         <div className="h-px w-full bg-linear-to-r from-transparent via-primary-400/80 to-transparent mb-4"></div>
         <button 
-          onClick={() => setIsAddModalOpen(true)}
+          onClick={() => { resetAddContactModal(); setIsAddModalOpen(true); }}
           className="w-full bg-primary-900 hover:bg-primary-800 border border-primary-800 hover:border-primary-700 text-primary-50 font-semibold py-2.5 rounded-full transition-all text-sm"
         >
           Add Contact
@@ -176,7 +182,7 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
               <div className="flex gap-2 justify-end">
                 <button 
                   type="button" 
-                  onClick={() => setIsAddModalOpen(false)}
+                  onClick={() => { resetAddContactModal(); setIsAddModalOpen(false); }}
                   className="px-4 py-2 text-sm text-primary-50 hover:text-primary-300 transition-colors"
                 >
                   Cancel

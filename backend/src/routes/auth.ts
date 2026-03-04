@@ -259,13 +259,15 @@ router.post('/contacts/add', authenticateToken, async (req: AuthenticatedRequest
     const ownerId = req.user!.userId; // Use authenticated user's ID, not client-supplied
     const { contactUsername } = req.body;
 
-    if (!contactUsername) {
+    // Normalize and validate the username
+    const normalized = typeof contactUsername === 'string' ? contactUsername.trim() : '';
+    if (!normalized) {
       res.status(400).json({ error: 'Missing required fields.' });
       return;
     }
 
     // Step A: Find the user they are trying to add
-    const targetUser = await db.select().from(users).where(eq(users.username, contactUsername)).limit(1);
+    const targetUser = await db.select().from(users).where(eq(users.username, normalized)).limit(1);
 
     if (targetUser.length === 0) {
       return res.status(404).json({ error: 'User not found. Check the username.' });
@@ -331,10 +333,19 @@ router.get('/contacts', authenticateToken, async (req: AuthenticatedRequest, res
   }
 });
 
+// Strict UUID v4 format check
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Fetch chat history between two specific users
 router.get('/messages/:user1/:user2', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { user1, user2 } = req.params;
+
+    if (!UUID_RE.test(user1) || !UUID_RE.test(user2)) {
+      res.status(400).json({ error: 'Invalid user id.' });
+      return;
+    }
+
     const authenticatedUserId = req.user!.userId;
 
     // Ensure the authenticated user is one of the two parties

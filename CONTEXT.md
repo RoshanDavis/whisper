@@ -109,9 +109,9 @@ All routes are defined in `backend/src/routes/auth.ts`.
 | `GET` | `/me` | Yes | Returns authenticated user's profile + wrapped key material |
 | `POST` | `/logout` | No | Clears the `whisper_token` cookie and disconnects the user's active Socket.IO sessions |
 | `GET` | `/users/:id/key` | No | Fetch a user's ECDH + ECDSA public keys by user ID |
-| `POST` | `/contacts/add` | Yes | Add a contact by username (owner derived from JWT); insert catches Postgres unique-constraint violation (23505) for race-safe 409 |
+| `POST` | `/contacts/add` | Yes | Add a contact by username (owner derived from JWT); server normalizes/trims username; insert catches Postgres unique-constraint violation (23505) for race-safe 409 |
 | `GET` | `/contacts` | Yes | Fetch the authenticated user's contact list (joined with public keys) |
-| `GET` | `/messages/:user1/:user2` | Yes | Fetch encrypted chat history between two users (requester must be user1 or user2; returns 403 otherwise); results ordered by `created_at ASC, id ASC` |
+| `GET` | `/messages/:user1/:user2` | Yes | Fetch encrypted chat history between two users; validates UUID format on params (400 if invalid); requester must be user1 or user2 (403 otherwise); results ordered by `created_at ASC, id ASC` |
 
 ## 7. Socket.IO Events
 
@@ -120,8 +120,8 @@ Defined in `backend/src/server.ts`. All socket connections require JWT authentic
 | Event | Direction | Payload | Notes |
 |---|---|---|---|
 | `registerUser` | Client -> Server | `userId` | Backward-compat; server ignores the param and uses JWT-authenticated `socket.data.userId` |
-| `sendMessage` | Client -> Server | `{ receiverId, ciphertext, iv, signature }` | Server saves to DB using `socket.data.userId` as sender, then sends privately to sender + receiver sockets only |
-| `receiveMessage` | Server -> Client | Full saved message row | Delivered privately to sender and receiver sockets via `io.to(socketId).emit(...)` |
+| `sendMessage` | Client -> Server | `{ receiverId, ciphertext, iv, signature }` | Server saves to DB using `socket.data.userId` as sender, then sends privately to all sender + receiver sockets (multi-tab safe via `Set<socketId>`) |
+| `receiveMessage` | Server -> Client | Full saved message row | Delivered privately to all sender and receiver sockets via `io.to(socketId).emit(...)` (supports multi-tab) |
 
 ## 8. Frontend Architecture
 
@@ -143,8 +143,8 @@ All routes are guarded by `isAuthenticated`. Redirects use `<Navigate replace>` 
 | Component | File | Purpose |
 |---|---|---|
 | `Navbar` | `components/Navbar.tsx` | Top nav bar with dynamic route pills, user dropdown with ARIA menu semantics (`aria-haspopup`, `aria-expanded`, `aria-controls`, `focus-visible` ring) |
-| `ContactsSidebar` | `components/ContactsSidebar.tsx` | Left sidebar: exports `Contact` interface (shared with `ChatArea`); fetches contacts via `GET /api/auth/contacts` with `credentials: 'include'`; uses `AbortController` to prevent stale fetch races on userId change/unmount; add-contact modal trims username before submit and sends only `contactUsername` (no `ownerId`); search/filter contacts |
-| `ChatArea` | `components/ChatArea.tsx` | Main chat view: clears stale messages immediately on contact switch; loads encrypted history with `AbortController` + stale-contact snapshot guard + `res.ok` check; decrypts using in-memory `ecdhPrivateKey` from AuthContext; verifies ECDSA signatures; real-time `receiveMessage` handler uses `isActive` flag to prevent stale writes after contact change, with fallback warning on decryption/verification failure; optimistic send with rollback on error; uses exported `Contact` type from `ContactsSidebar` (no `any`) |
+| `ContactsSidebar` | `components/ContactsSidebar.tsx` | Left sidebar: exports `Contact` interface (shared with `ChatArea`); fetches contacts via `GET /api/auth/contacts` with `credentials: 'include'`; uses `AbortController` to prevent stale fetch races on userId change/unmount; add-contact modal trims username before submit, sends only `contactUsername` (no `ownerId`), uses `resetAddContactModal()` helper for centralized state cleanup on open/close/success; search/filter contacts |
+| `ChatArea` | `components/ChatArea.tsx` | Main chat view: clears stale messages immediately on contact switch; loads encrypted history with `AbortController` + stale-contact snapshot guard + `res.ok` check; decrypts using in-memory `ecdhPrivateKey` from AuthContext; verifies ECDSA signatures; real-time `receiveMessage` handler uses `isActive` flag to prevent stale writes after contact change, with fallback warning on decryption/verification failure; optimistic send uses `crypto.randomUUID()` for collision-safe tempId with rollback on error; uses exported `Contact` type from `ContactsSidebar` (no `any`) |
 | `Chat` | `pages/Chat.tsx` | Layout page composing `ContactsSidebar` + `ChatArea` with selected contact state |
 | `Login` | `pages/Login.tsx` | Login form: posts to `/api/auth/login` with `credentials: 'include'`; derives PBKDF2 wrapping key from password + server-returned salt; unwraps both private keys into CryptoKey objects; calls `login(canonicalUsername, userId, ecdhKey, ecdsaKey)` using server-confirmed username |
 | `Register` | `pages/Register.tsx` | Registration form: generates ECDH + ECDSA key pairs in browser; wraps private keys with password-derived AES key; posts all material (public keys, wrapped private keys, IVs, salt) to `/api/auth/register` |
@@ -223,6 +223,7 @@ npm run dev                 # Vite -> http://localhost:5173
 * [x] **Phase 7.5 (Security Hardening):** HttpOnly cookie auth, IDOR protection on contacts endpoints, AbortController race-condition guards, optimistic message rollback, scoped scrollbar styles, ARIA accessibility on Navbar, no private keys in localStorage, Vite dev proxy (no hardcoded URLs), Socket.IO JWT middleware
 * [x] **Phase 7.6 (Security Hardening Round 2):** Secondary DB indexes (contacts owner, messages sender/receiver, messages receiver/created_at), private Socket.IO message delivery (connectedUsers keyed by userId, `io.to()` instead of broadcast), `isAuthenticated` gate includes `ecdsaPrivateKey`, messages route requires JWT auth + IDOR authorization, decryption-failure fallback in real-time handler, exported `Contact` type (no `any`)
 * [x] **Phase 7.7 (Security Hardening Round 3):** Race-safe contacts insert (catches Postgres 23505 unique violation instead of select-then-insert), logout disconnects active Socket.IO sessions (`io` exposed via `app.set`), JWT removed from login JSON response body (HttpOnly cookie only), chat history ordered by `created_at ASC, id ASC`, ChatArea clears stale messages on contact switch + checks `res.ok`, receiveMessage handler uses `isActive` flag to prevent stale writes, ContactsSidebar trims username before POST, Markdown table formatting (MD058 blank lines)
+* [x] **Phase 7.8 (Security Hardening Round 4):** `connectedUsers` changed from `Map<userId, socketId>` to `Map<userId, Set<socketId>>` for multi-tab support (connection adds to set, disconnect removes from set, message emit iterates all sockets), optimistic tempId uses `crypto.randomUUID()` instead of `Date.now()`, UUID format validation on `/messages/:user1/:user2` params (400 on invalid), backend normalizes/trims `contactUsername` before DB lookup, ContactsSidebar centralizes modal state cleanup via `resetAddContactModal()` helper
 * [ ] **Phase 8:** Deployment & Network Traffic Verification
 
 ## 12. Pending Action Items
