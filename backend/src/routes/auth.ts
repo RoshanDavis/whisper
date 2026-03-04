@@ -316,10 +316,17 @@ router.get('/contacts', authenticateToken, async (req: AuthenticatedRequest, res
 });
 
 // Fetch chat history between two specific users
-router.get('/messages/:user1/:user2', async (req, res) => {
+router.get('/messages/:user1/:user2', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { user1, user2 } = req.params;
-    
+    const authenticatedUserId = req.user!.userId;
+
+    // Ensure the authenticated user is one of the two parties
+    if (authenticatedUserId !== user1 && authenticatedUserId !== user2) {
+      res.status(403).json({ error: 'You are not authorized to view this conversation.' });
+      return;
+    }
+
     // Find all messages where User1 sent to User2, OR User2 sent to User1
     const chatHistory = await db.select()
       .from(messages)

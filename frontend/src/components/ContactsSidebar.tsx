@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { getContactColor } from '../utils/contactColor';
 
-interface Contact {
+export interface Contact {
   id: string;
   username: string;
   publicKey: string;

@@ -73,7 +73,7 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
   const userId = socket.data.userId as string;
-  connectedUsers.set(socket.id, userId);
+  connectedUsers.set(userId, socket.id);
   console.log(`🔌 User ${userId} connected on socket ${socket.id}`);
 
   // Keep registerUser for backward compat but ignore the userId param (use authenticated one)
@@ -104,8 +104,11 @@ io.on('connection', (socket) => {
 
       console.log('✅ Encrypted and signed message saved to database!');
 
-      // 4. Broadcast the saved message back to the clients
-      io.emit('receiveMessage', savedMessage[0]);
+      // 4. Send the saved message privately to sender and receiver
+      const senderSocketId = connectedUsers.get(senderId);
+      const receiverSocketId = connectedUsers.get(data.receiverId);
+      if (senderSocketId) io.to(senderSocketId).emit('receiveMessage', savedMessage[0]);
+      if (receiverSocketId && receiverSocketId !== senderSocketId) io.to(receiverSocketId).emit('receiveMessage', savedMessage[0]);
 
     } catch (error) {
       console.error('❌ Error saving message to database:', error);
@@ -114,7 +117,7 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log(`🔴 Connection closed: ${socket.id}`);
-    connectedUsers.delete(socket.id); // Clean up memory when they leave
+    connectedUsers.delete(userId); // Clean up memory when they leave
   });
 });
 

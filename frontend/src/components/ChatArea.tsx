@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useSocket } from "../contexts/SocketContext";
 import { getContactColor } from "../utils/contactColor";
+import type { Contact } from "./ContactsSidebar";
 import {
   importPublicKey,
   deriveSharedSecret,
@@ -22,7 +23,7 @@ interface Message {
 }
 
 interface ChatAreaProps {
-  selectedContact: any | null;
+  selectedContact: Contact | null;
 }
 
 export default function ChatArea({ selectedContact }: ChatAreaProps) {
@@ -170,6 +171,17 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
         ]);
       } catch (err) {
         console.error("Decryption failed:", err);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: savedMessage.id,
+            text: "\u26a0\ufe0f [Security Warning] Message could not be decrypted/verified",
+            senderId: savedMessage.senderId,
+            receiverId: savedMessage.receiverId,
+            isOwnMessage: false,
+            isVerified: false,
+          },
+        ]);
       }
     };
 
@@ -248,7 +260,6 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
   if (!selectedContact) {
     return (
       <div className="flex-1 h-full bg-primary-950 ml-0 flex flex-col items-center justify-center relative overflow-hidden rounded-2xl border border-primary-50 shadow-lg mr-5">
-        <div className="absolute top-0 left-0 w-full h-0.5 bg-linear-to-r from-primary-400 to-secondary-500"></div>
         <div className="w-16 h-16 rounded-full bg-primary-900 flex items-center justify-center mb-4 border border-primary-800">
           <svg
             className="w-8 h-8 text-primary-400"

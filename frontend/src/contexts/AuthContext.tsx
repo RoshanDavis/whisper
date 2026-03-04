@@ -23,8 +23,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ecdhPrivateKey, setEcdhPrivateKey] = useState<CryptoKey | null>(null);
   const [ecdsaPrivateKey, setEcdsaPrivateKey] = useState<CryptoKey | null>(null);
 
-  // Fully authenticated = user info + crypto keys loaded
-  const isAuthenticated = currentUser !== null && userId !== null && ecdhPrivateKey !== null;
+  // Fully authenticated = user info + both crypto keys loaded
+  const isAuthenticated = currentUser !== null && userId !== null && ecdhPrivateKey !== null && ecdsaPrivateKey !== null;
 
   const login = (username: string, newUserId: string, ecdhKey: CryptoKey, ecdsaKey: CryptoKey) => {
     setCurrentUser(username);

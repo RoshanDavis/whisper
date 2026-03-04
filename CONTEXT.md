@@ -39,12 +39,12 @@ The application uses the **ECDH** algorithm for asymmetric key exchange to agree
 * On login the JWT is set as an **HttpOnly, SameSite=Lax, Secure (in production)** cookie named `whisper_token`.
 * A reusable `authenticateToken` middleware in `auth.ts` parses the cookie (or `Authorization: Bearer` header as fallback) and attaches `req.user = { userId, username }` to all protected routes.
 * Socket.IO connections are authenticated by an `io.use(...)` middleware that verifies the JWT from the cookie/handshake auth before accepting the socket. The authenticated `userId` is stored on `socket.data.userId`.
-* **Endpoints requiring auth:** `GET /api/auth/me`, `POST /api/auth/logout`, `GET /api/auth/contacts`, `POST /api/auth/contacts/add`.
+* **Endpoints requiring auth:** `GET /api/auth/me`, `POST /api/auth/logout`, `GET /api/auth/contacts`, `POST /api/auth/contacts/add`, `GET /api/auth/messages/:user1/:user2`.
 
 ### Frontend
 * `AuthContext` provides: `currentUser`, `userId`, `ecdhPrivateKey`, `ecdsaPrivateKey`, `isAuthenticated`, `login()`, `logout()`.
 * **No `localStorage`** is used for tokens, usernames, user IDs, or key material. All sensitive state lives exclusively in React memory and is wiped on logout/refresh.
-* `isAuthenticated` (derived: `currentUser !== null && userId !== null && ecdhPrivateKey !== null`) gates all route guards in `App.tsx` and the Socket.IO connection in `SocketContext`.
+* `isAuthenticated` (derived: `currentUser !== null && userId !== null && ecdhPrivateKey !== null && ecdsaPrivateKey !== null`) gates all route guards in `App.tsx` and the Socket.IO connection in `SocketContext`.
 * `logout()` calls `POST /api/auth/logout` (clears the HttpOnly cookie server-side) then zeroes all in-memory state.
 * A page refresh requires re-login because the in-memory CryptoKey objects are lost (this is the intentional security trade-off).
 
@@ -87,6 +87,13 @@ Defined in `backend/src/db/schema.ts`.
 | `created_at` | `timestamp` | `defaultNow()` |
 | | | **`UNIQUE(owner_id, contact_id)`** constraint: `owner_contact_unique` |
 
+### Secondary Indexes (Migration SQL)
+| Index Name | Table | Column(s) |
+|---|---|---|
+| `idx_contacts_owner_id` | `contacts` | `owner_id` |
+| `idx_messages_sender_receiver` | `messages` | `sender_id, receiver_id` |
+| `idx_messages_receiver_created` | `messages` | `receiver_id, created_at` |
+
 ## 6. API Routes (`/api/auth/...`)
 
 All routes are defined in `backend/src/routes/auth.ts`.
@@ -100,7 +107,7 @@ All routes are defined in `backend/src/routes/auth.ts`.
 | `GET` | `/users/:id/key` | No | Fetch a user's ECDH + ECDSA public keys by user ID |
 | `POST` | `/contacts/add` | Yes | Add a contact by username (owner derived from JWT, not from body) |
 | `GET` | `/contacts` | Yes | Fetch the authenticated user's contact list (joined with public keys) |
-| `GET` | `/messages/:user1/:user2` | No | Fetch encrypted chat history between two users |
+| `GET` | `/messages/:user1/:user2` | Yes | Fetch encrypted chat history between two users (requester must be user1 or user2; returns 403 otherwise) |
 
 ## 7. Socket.IO Events
 
@@ -109,8 +116,8 @@ Defined in `backend/src/server.ts`. All socket connections require JWT authentic
 | Event | Direction | Payload | Notes |
 |---|---|---|---|
 | `registerUser` | Client -> Server | `userId` | Backward-compat; server ignores the param and uses JWT-authenticated `socket.data.userId` |
-| `sendMessage` | Client -> Server | `{ receiverId, ciphertext, iv, signature }` | Server saves to DB using `socket.data.userId` as sender, then broadcasts |
-| `receiveMessage` | Server -> Client | Full saved message row | Broadcast to all connected sockets (client-side filters by recipient/sender) |
+| `sendMessage` | Client -> Server | `{ receiverId, ciphertext, iv, signature }` | Server saves to DB using `socket.data.userId` as sender, then sends privately to sender + receiver sockets only |
+| `receiveMessage` | Server -> Client | Full saved message row | Delivered privately to sender and receiver sockets via `io.to(socketId).emit(...)` |
 
 ## 8. Frontend Architecture
 
@@ -131,8 +138,8 @@ All routes are guarded by `isAuthenticated`. Redirects use `<Navigate replace>` 
 | Component | File | Purpose |
 |---|---|---|
 | `Navbar` | `components/Navbar.tsx` | Top nav bar with dynamic route pills, user dropdown with ARIA menu semantics (`aria-haspopup`, `aria-expanded`, `aria-controls`, `focus-visible` ring) |
-| `ContactsSidebar` | `components/ContactsSidebar.tsx` | Left sidebar: fetches contacts via `GET /api/auth/contacts` with `credentials: 'include'`; uses `AbortController` to prevent stale fetch races on userId change/unmount; add-contact modal sends only `contactUsername` (no `ownerId`); search/filter contacts |
-| `ChatArea` | `components/ChatArea.tsx` | Main chat view: loads encrypted history with `AbortController` + stale-contact snapshot guard; decrypts using in-memory `ecdhPrivateKey` from AuthContext; verifies ECDSA signatures; listens for real-time `receiveMessage` events; optimistic send with rollback on error (removes temp message from state on catch) |
+| `ContactsSidebar` | `components/ContactsSidebar.tsx` | Left sidebar: exports `Contact` interface (shared with `ChatArea`); fetches contacts via `GET /api/auth/contacts` with `credentials: 'include'`; uses `AbortController` to prevent stale fetch races on userId change/unmount; add-contact modal sends only `contactUsername` (no `ownerId`); search/filter contacts |
+| `ChatArea` | `components/ChatArea.tsx` | Main chat view: loads encrypted history with `AbortController` + stale-contact snapshot guard; decrypts using in-memory `ecdhPrivateKey` from AuthContext; verifies ECDSA signatures; listens for real-time `receiveMessage` events with fallback warning on decryption/verification failure; optimistic send with rollback on error; uses exported `Contact` type from `ContactsSidebar` (no `any`) |
 | `Chat` | `pages/Chat.tsx` | Layout page composing `ContactsSidebar` + `ChatArea` with selected contact state |
 | `Login` | `pages/Login.tsx` | Login form: posts to `/api/auth/login` with `credentials: 'include'`; derives PBKDF2 wrapping key from password + server-returned salt; unwraps both private keys into CryptoKey objects; calls `login(canonicalUsername, userId, ecdhKey, ecdsaKey)` using server-confirmed username |
 | `Register` | `pages/Register.tsx` | Registration form: generates ECDH + ECDSA key pairs in browser; wraps private keys with password-derived AES key; posts all material (public keys, wrapped private keys, IVs, salt) to `/api/auth/register` |
@@ -207,6 +214,7 @@ npm run dev                 # Vite -> http://localhost:5173
 * [x] **Phase 6:** Implement user registration/login with full key generation, wrapping, and unwrapping
 * [x] **Phase 7:** Implement Cryptography Engine -- ECDH key exchange, AES-256-GCM encryption/decryption, ECDSA signing/verification
 * [x] **Phase 7.5 (Security Hardening):** HttpOnly cookie auth, IDOR protection on contacts endpoints, AbortController race-condition guards, optimistic message rollback, scoped scrollbar styles, ARIA accessibility on Navbar, no private keys in localStorage, Vite dev proxy (no hardcoded URLs), Socket.IO JWT middleware
+* [x] **Phase 7.6 (Security Hardening Round 2):** Secondary DB indexes (contacts owner, messages sender/receiver, messages receiver/created_at), private Socket.IO message delivery (connectedUsers keyed by userId, `io.to()` instead of broadcast), `isAuthenticated` gate includes `ecdsaPrivateKey`, messages route requires JWT auth + IDOR authorization, decryption-failure fallback in real-time handler, exported `Contact` type (no `any`)
 * [ ] **Phase 8:** Deployment & Network Traffic Verification
 
 ## 12. Pending Action Items
