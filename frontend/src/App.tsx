@@ -11,30 +11,73 @@ import About from './pages/About';
 export default function App() {
   const { isAuthenticated } = useAuth();
   const [serverReady, setServerReady] = useState(false);
+  const [serverError, setServerError] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+
+  const MAX_RETRIES = 10;
 
   // Ping the health endpoint on mount to wake the serverless backend
   useEffect(() => {
     let cancelled = false;
+    let timerId: ReturnType<typeof setTimeout> | undefined;
 
     const ping = async () => {
       try {
         const res = await fetch(`${API_URL}/api/health`);
-        if (!cancelled && res.ok) setServerReady(true);
+        if (cancelled) return;
+        if (res.ok) {
+          setServerReady(true);
+        } else {
+          // Non-ok response — retry
+          setRetryCount((c) => {
+            if (c + 1 >= MAX_RETRIES) {
+              setServerError(true);
+              return c + 1;
+            }
+            timerId = setTimeout(ping, 2000);
+            return c + 1;
+          });
+        }
       } catch {
-        // Retry after a short delay on failure (cold start can take a few seconds)
-        if (!cancelled) setTimeout(ping, 2000);
+        if (cancelled) return;
+        // Network error — retry
+        setRetryCount((c) => {
+          if (c + 1 >= MAX_RETRIES) {
+            setServerError(true);
+            return c + 1;
+          }
+          timerId = setTimeout(ping, 2000);
+          return c + 1;
+        });
       }
     };
 
     ping();
-    return () => { cancelled = true; };
-  }, []);
+    return () => {
+      cancelled = true;
+      if (timerId !== undefined) clearTimeout(timerId);
+    };
+  }, [retryCount === 0]); // re-runs when retryCount is reset to 0 via Retry button
 
   if (!serverReady) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-primary-950 text-primary-50">
-        <div className="animate-spin rounded-full h-10 w-10 border-2 border-primary-400 border-t-transparent mb-4" />
-        <p className="text-sm tracking-wide">Waking up secure server...</p>
+        {serverError ? (
+          <>
+            <p className="text-sm tracking-wide mb-4">Unable to reach the server. Please try again.</p>
+            <button
+              onClick={() => { setServerError(false); setRetryCount(0); }}
+              className="px-4 py-2 bg-primary-700 hover:bg-primary-600 text-primary-50 text-sm font-bold rounded-lg transition-colors"
+            >
+              Retry
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="animate-spin rounded-full h-10 w-10 border-2 border-primary-400 border-t-transparent mb-4" />
+            <p className="text-sm tracking-wide">Waking up secure server...</p>
+          </>
+        )}
       </div>
     );
   }

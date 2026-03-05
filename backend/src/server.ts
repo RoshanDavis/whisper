@@ -42,7 +42,8 @@ app.get('/api/health', async (_req, res) => {
   try {
     await db.execute(sql`SELECT 1`);
     res.status(200).json({ status: 'ok' });
-  } catch {
+  } catch (err) {
+    console.error('Health check failed:', err);
     res.status(503).json({ status: 'unavailable' });
   }
 });
