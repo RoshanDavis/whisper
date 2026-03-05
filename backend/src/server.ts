@@ -9,6 +9,7 @@ import jwt from 'jsonwebtoken';
 // Import our database and schema
 import { db } from './db/index';
 import { messages, conversations, contacts } from './db/schema';
+import { sql } from 'drizzle-orm';
 
 import authRoutes from './routes/auth';
 
@@ -36,9 +37,15 @@ app.get('/', (req, res) => {
   res.send('Whisper Backend is running securely!');
 });
 
-// Lightweight health check — pure server ping, no DB round-trip
-app.get('/api/health', (_req, res) => {
-  res.status(200).json({ status: 'awake' });
+// Smart health check — proves the DB connection pool is live
+app.get('/api/health', async (_req, res) => {
+  try {
+    await db.execute(sql`SELECT 1`);
+    res.status(200).json({ status: 'ready' });
+  } catch (err) {
+    console.error('Health check: DB not ready yet —', (err as Error).message);
+    res.status(503).json({ status: 'waking_up' });
+  }
 });
 
 // Expose io to route handlers via req.app.get('io')
