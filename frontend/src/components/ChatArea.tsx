@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useSocket } from "../contexts/SocketContext";
 import { getContactColor } from "../utils/contactColor";
-import API_URL from "../utils/api";
+import API_URL, { authFetch } from "../utils/api";
 import type { Contact } from "./ContactsSidebar";
 import {
   importPublicKey,
@@ -53,9 +53,9 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
 
     const loadHistory = async () => {
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `${API_URL}/api/auth/messages/${userId}/${contactId}`,
-          { credentials: 'include', signal: controller.signal },
+          { signal: controller.signal },
         );
         if (controller.signal.aborted) return;
         if (!res.ok) {

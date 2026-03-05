@@ -1,5 +1,5 @@
 // frontend/src/contexts/AuthContext.tsx
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import API_URL from '../utils/api';
 
 // 1. Define the shape of our global authentication state
@@ -32,6 +32,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUserId(newUserId);
     setEcdhPrivateKey(ecdhKey);
     setEcdsaPrivateKey(ecdsaKey);
+    // Notify other tabs so they reload with fresh auth state
+    localStorage.setItem('auth_sync', Date.now().toString());
   };
 
   const logout = async () => {
@@ -44,7 +46,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUserId(null);
     setEcdhPrivateKey(null);
     setEcdsaPrivateKey(null);
+    // Notify other tabs so they reload and drop stale state
+    localStorage.setItem('auth_sync', Date.now().toString());
   };
+
+  // Cross-tab synchronization: reload when another tab logs in or out
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'auth_sync') {
+        window.location.reload();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
 
   return (
     <AuthContext.Provider value={{ currentUser, userId, isAuthenticated, ecdhPrivateKey, ecdsaPrivateKey, login, logout }}>

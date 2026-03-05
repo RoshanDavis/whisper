@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import { getContactColor } from '../utils/contactColor';
-import API_URL from '../utils/api';
+import API_URL, { authFetch } from '../utils/api';
 
 export interface Contact {
   id: string;
@@ -37,8 +37,7 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
 
   const fetchInbox = useCallback(async (signal?: AbortSignal) => {
     try {
-      const res = await fetch(`${API_URL}/api/auth/inbox`, {
-        credentials: 'include',
+      const res = await authFetch(`${API_URL}/api/auth/inbox`, {
         signal,
       });
       if (signal?.aborted) return;
@@ -77,9 +76,8 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
 
   const handleAcceptContact = async (contactId: string) => {
     try {
-      const res = await fetch(`${API_URL}/api/auth/contacts/${contactId}/accept`, {
+      const res = await authFetch(`${API_URL}/api/auth/contacts/${contactId}/accept`, {
         method: 'PATCH',
-        credentials: 'include',
       });
       if (!res.ok) throw new Error('Failed to accept');
       await fetchInbox();
@@ -90,9 +88,8 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
 
   const handleRejectContact = async (contactId: string) => {
     try {
-      const res = await fetch(`${API_URL}/api/auth/contacts/${contactId}`, {
+      const res = await authFetch(`${API_URL}/api/auth/contacts/${contactId}`, {
         method: 'DELETE',
-        credentials: 'include',
       });
       if (!res.ok) throw new Error('Failed to remove');
       // If the rejected contact was selected, deselect them
@@ -115,11 +112,10 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
     setIsAdding(true);
 
     try {
-      const res = await fetch(`${API_URL}/api/auth/contacts/add`, {
+      const res = await authFetch(`${API_URL}/api/auth/contacts/add`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contactUsername: trimmedUsername }),
-        credentials: 'include',
       });
 
       const data = await res.json();
