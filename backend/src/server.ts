@@ -86,11 +86,38 @@ io.use((socket, next) => {
   }
 });
 
+// ── DB keep-alive heartbeat ──
+// Ping the database every 30 s while at least one user is connected.
+// This keeps the pg pool warm so messages/queries never hit a cold connection.
+let dbHeartbeat: ReturnType<typeof setInterval> | null = null;
+
+function startDbHeartbeat() {
+  if (dbHeartbeat) return; // already running
+  dbHeartbeat = setInterval(async () => {
+    try {
+      await db.execute(sql`SELECT 1`);
+    } catch (err) {
+      console.warn('DB heartbeat failed:', (err as Error).message);
+    }
+  }, 30_000); // every 30 s — well under the 10 s idle timeout
+  console.log('💓 DB heartbeat started');
+}
+
+function stopDbHeartbeat() {
+  if (!dbHeartbeat) return;
+  clearInterval(dbHeartbeat);
+  dbHeartbeat = null;
+  console.log('💤 DB heartbeat stopped (no connected users)');
+}
+
 io.on('connection', (socket) => {
   const userId = socket.data.userId as string;
   if (!connectedUsers.has(userId)) connectedUsers.set(userId, new Set());
   connectedUsers.get(userId)!.add(socket.id);
   console.log(`🔌 User ${userId} connected on socket ${socket.id}`);
+
+  // Start the heartbeat as soon as the first user connects
+  startDbHeartbeat();
 
   // Keep registerUser for backward compat but ignore the userId param (use authenticated one)
   socket.on('registerUser', () => {
@@ -201,6 +228,8 @@ io.on('connection', (socket) => {
       sockets.delete(socket.id);
       if (sockets.size === 0) connectedUsers.delete(userId);
     }
+    // Stop the heartbeat when no users are connected (let the pool + server idle naturally)
+    if (connectedUsers.size === 0) stopDbHeartbeat();
   });
 });
 
