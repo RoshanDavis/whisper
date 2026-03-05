@@ -11,7 +11,6 @@ const pool = new Pool({
   connectionTimeoutMillis: 30_000, // 30 s — tolerate slow cold-start routes to Supabase
   idleTimeoutMillis: 10_000,       // 10 s — aggressively release idle connections before cloud routers drop them
   keepAlive: true,                 // Prevent cloud networks from silently killing idle TCP sockets
-  family: 4,                       // Force IPv4 — skip IPv6 black hole on Render's network
   ssl: {
     rejectUnauthorized: false, // Required for managed providers like Supabase
   },

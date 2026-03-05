@@ -43,7 +43,7 @@ app.get('/api/health', async (_req, res) => {
     await db.execute(sql`SELECT 1`);
     res.status(200).json({ status: 'ready' });
   } catch (err) {
-    console.error('Health check: DB not ready yet —', (err as Error).message);
+    console.error('Health Check Error:', (err as Error).message);
     res.status(503).json({ status: 'waking_up' });
   }
 });
