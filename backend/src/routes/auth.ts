@@ -143,6 +143,7 @@ router.post('/login', async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
+      domain: process.env.NODE_ENV === 'production' ? '.whisper-chat.app' : undefined,
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
       path: '/',
     });

@@ -65,6 +65,7 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        credentials: 'include',
       });
 
       const data = await response.json();
