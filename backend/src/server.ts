@@ -141,23 +141,18 @@ io.on('connection', (socket) => {
       const senderSockets = connectedUsers.get(senderId);
       const receiverSockets = connectedUsers.get(data.receiverId);
 
-      // Auto-create a pending contact for the receiver so the sender appears in their inbox
-      try {
-        await db.insert(contacts).values({
-          ownerId: data.receiverId,
-          contactId: senderId,
-          status: 'pending',
-        });
-        // Notify receiver to refresh their inbox (new pending contact)
-        if (receiverSockets) {
-          for (const sid of receiverSockets) {
-            io.to(sid).emit('inboxUpdated');
-          }
-        }
-      } catch (err: any) {
-        // 23505 = unique violation → contact already exists, which is fine
-        if (err?.code !== '23505') {
-          console.error('Error auto-creating pending contact:', err);
+      // Auto-create a pending contact for the receiver so the sender appears in their inbox.
+      // Uses onConflictDoNothing so an existing relationship is silently skipped.
+      const insertResult = await db.insert(contacts).values({
+        ownerId: data.receiverId,
+        contactId: senderId,
+        status: 'pending',
+      }).onConflictDoNothing({ target: [contacts.ownerId, contacts.contactId] });
+
+      // Notify receiver only when a new pending contact was actually created
+      if (insertResult.rowCount && insertResult.rowCount > 0 && receiverSockets) {
+        for (const sid of receiverSockets) {
+          io.to(sid).emit('inboxUpdated');
         }
       }
 
