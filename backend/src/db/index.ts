@@ -10,6 +10,7 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   connectionTimeoutMillis: 30_000, // 30 s — tolerate slow cold-start routes to Supabase
   idleTimeoutMillis: 30_000,       // 30 s — release idle connections before cloud LBs kill them
+  keepAlive: true,                 // Prevent cloud networks from silently killing idle TCP sockets
   ssl: {
     rejectUnauthorized: false, // Required for managed providers like Supabase
   },
