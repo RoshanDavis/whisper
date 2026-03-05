@@ -12,7 +12,7 @@ export default function App() {
   const { isAuthenticated } = useAuth();
   const [serverReady, setServerReady] = useState(false);
   const [serverError, setServerError] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
+  const [, setRetryCount] = useState(0);
   const [retryTrigger, setRetryTrigger] = useState(false);
 
   const MAX_RETRIES = 10;
