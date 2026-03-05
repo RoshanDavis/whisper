@@ -9,6 +9,7 @@ import jwt from 'jsonwebtoken';
 // Import our database and schema
 import { db } from './db/index';
 import { messages, conversations, contacts } from './db/schema';
+import { sql } from 'drizzle-orm';
 
 import authRoutes from './routes/auth';
 
@@ -34,6 +35,16 @@ const io = new Server(server, {
 
 app.get('/', (req, res) => {
   res.send('Whisper Backend is running securely!');
+});
+
+// Lightweight health check — wakes the DB connection pool on cold starts
+app.get('/api/health', async (_req, res) => {
+  try {
+    await db.execute(sql`SELECT 1`);
+    res.status(200).json({ status: 'ok' });
+  } catch {
+    res.status(503).json({ status: 'unavailable' });
+  }
 });
 
 // Expose io to route handlers via req.app.get('io')
