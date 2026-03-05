@@ -87,27 +87,18 @@ io.use((socket, next) => {
 });
 
 // ── DB keep-alive heartbeat ──
-// While users are connected, periodically check out a client from the pool
-// and run SELECT 1.  If it fails, the pool evicts that dead client automatically.
-// We do this every 15 s — frequent enough that the pool never sits idle long
-// enough for Supabase/PgBouncer to kill the session, but not so aggressive
-// that we waste resources.
-const DB_HEARTBEAT_MS = 15_000;
+// With max:1, there is exactly ONE pool connection. The heartbeat pings it
+// every 8 s to prevent Render's network layer and Supavisor from killing it.
+// If the ping fails, the pool evicts the dead client and the next query
+// (or the next heartbeat) will open a fresh replacement.
+const DB_HEARTBEAT_MS = 8_000;
 let dbHeartbeat: ReturnType<typeof setInterval> | null = null;
 
 async function heartbeatPing() {
-  // Use a raw pool.query so we exercise the actual pool checkout/return cycle.
-  // If the client is dead, pg.Pool will detect the error and discard it.
-  // Retry once so the pool always has at least one warm connection ready.
   try {
     await pool.query('SELECT 1');
   } catch (err) {
-    console.warn('💔 Heartbeat failed, retrying to warm a fresh client…', (err as Error).message);
-    try {
-      await pool.query('SELECT 1');
-    } catch (err2) {
-      console.error('💔💔 Heartbeat retry also failed:', (err2 as Error).message);
-    }
+    console.warn('💔 Heartbeat: dead connection evicted, pool will reconnect on next use:', (err as Error).message);
   }
 }
 
