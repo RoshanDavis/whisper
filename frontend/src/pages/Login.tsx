@@ -56,7 +56,7 @@ export default function Login() {
       }
 
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.message || 'Internal server error during login');
     } finally {
       setIsLoading(false);
     }

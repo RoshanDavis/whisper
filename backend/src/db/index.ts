@@ -8,6 +8,7 @@ dotenv.config();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  connectionTimeoutMillis: 30_000, // 30 s — tolerate slow cold-start routes to Supabase
   ssl: {
     rejectUnauthorized: false, // Required for managed providers like Supabase
   },
