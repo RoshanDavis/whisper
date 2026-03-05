@@ -114,26 +114,45 @@ io.on('connection', (socket) => {
         ? [senderId, data.receiverId]
         : [data.receiverId, senderId];
 
-      // Transactional write: insert message + upsert conversation in one atomic op
-      const savedMessage = await db.transaction(async (tx) => {
-        const [msg] = await tx.insert(messages).values({
-          senderId: senderId,
-          receiverId: data.receiverId,
-          ciphertext: data.ciphertext,
-          iv: data.iv,
-          signature: data.signature,
-        }).returning();
+      // Helper: run the DB transaction (extracted so we can retry once)
+      const execTransaction = () =>
+        db.transaction(async (tx) => {
+          const [msg] = await tx.insert(messages).values({
+            senderId: senderId,
+            receiverId: data.receiverId,
+            ciphertext: data.ciphertext,
+            iv: data.iv,
+            signature: data.signature,
+          }).returning();
 
-        await tx
-          .insert(conversations)
-          .values({ user1Id, user2Id, lastMessageAt: msg.createdAt! })
-          .onConflictDoUpdate({
-            target: [conversations.user1Id, conversations.user2Id],
-            set: { lastMessageAt: msg.createdAt! },
-          });
+          await tx
+            .insert(conversations)
+            .values({ user1Id, user2Id, lastMessageAt: msg.createdAt! })
+            .onConflictDoUpdate({
+              target: [conversations.user1Id, conversations.user2Id],
+              set: { lastMessageAt: msg.createdAt! },
+            });
 
-        return msg;
-      });
+          return msg;
+        });
+
+      // Attempt the transaction; on a dead-connection error, retry once with a fresh connection
+      let savedMessage;
+      try {
+        savedMessage = await execTransaction();
+      } catch (firstErr: any) {
+        const isConnectionDrop =
+          firstErr?.code === 'ECONNRESET' ||
+          firstErr?.code === 'ETIMEDOUT' ||
+          /terminated|connection|reset|timeout/i.test(firstErr?.message ?? '');
+
+        if (isConnectionDrop) {
+          console.warn('⚠️ DB connection dropped — retrying transaction once...');
+          savedMessage = await execTransaction();
+        } else {
+          throw firstErr;
+        }
+      }
 
       console.log('✅ Encrypted and signed message saved to database!');
 

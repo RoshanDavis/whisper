@@ -16,4 +16,9 @@ const pool = new Pool({
   },
 });
 
+// Mandatory: discard broken idle clients instead of crashing the process
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle database client:', err.message);
+});
+
 export const db = drizzle(pool, { schema });
