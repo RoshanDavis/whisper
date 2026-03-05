@@ -8,6 +8,9 @@ dotenv.config();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false, // Required for managed providers like Supabase
+  },
 });
 
 export const db = drizzle(pool, { schema });
