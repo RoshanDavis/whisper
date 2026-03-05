@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcrypt';
 import { eq, or, and, asc, desc, sql } from 'drizzle-orm';
-import { db } from '../db/index';
+import { db, withRetry } from '../db/index';
 import { users, messages, contacts, conversations } from '../db/schema';
 import jwt from 'jsonwebtoken';
 
@@ -71,7 +71,7 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'All cryptographic fields are required.' });
     }
 
-    const existingUser = await db.select().from(users).where(eq(users.username, username)).limit(1);
+    const existingUser = await withRetry(() => db.select().from(users).where(eq(users.username, username)).limit(1));
     
     if (existingUser.length > 0) {
       return res.status(409).json({ error: 'Username already exists. Please choose another.' });
@@ -80,7 +80,7 @@ router.post('/register', async (req, res) => {
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    const newUser = await db.insert(users).values({
+    const newUser = await withRetry(() => db.insert(users).values({
       username,
       passwordHash,
       publicKey,
@@ -93,7 +93,7 @@ router.post('/register', async (req, res) => {
     }).returning({
       id: users.id,
       username: users.username,
-    });
+    }));
 
     res.status(201).json({ 
       message: 'User registered successfully!', 
@@ -114,7 +114,7 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Username and password are required.' });
     }
 
-    const existingUser = await db.select().from(users).where(eq(users.username, username)).limit(1);
+    const existingUser = await withRetry(() => db.select().from(users).where(eq(users.username, username)).limit(1));
     const user = existingUser[0];
 
     if (!user) {
@@ -177,7 +177,7 @@ router.post('/login', async (req, res) => {
 router.get('/me', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const existingUser = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const existingUser = await withRetry(() => db.select().from(users).where(eq(users.id, userId)).limit(1));
     const user = existingUser[0];
 
     if (!user) {
@@ -231,7 +231,7 @@ router.post('/logout', (req, res) => {
 // Fetch BOTH Public Keys (Encryption & Signing) by user ID
 router.get('/users/:id/key', async (req, res) => {
   try {
-    const targetUser = await db.select().from(users).where(eq(users.id, req.params.id)).limit(1);
+    const targetUser = await withRetry(() => db.select().from(users).where(eq(users.id, req.params.id)).limit(1));
     
     if (targetUser.length === 0) {
       return res.status(404).json({ error: 'User not found' });
@@ -268,7 +268,7 @@ router.post('/contacts/add', authenticateToken, async (req: AuthenticatedRequest
     }
 
     // Step A: Find the user they are trying to add
-    const targetUser = await db.select().from(users).where(eq(users.username, normalized)).limit(1);
+    const targetUser = await withRetry(() => db.select().from(users).where(eq(users.username, normalized)).limit(1));
 
     if (targetUser.length === 0) {
       return res.status(404).json({ error: 'User not found. Check the username.' });
@@ -282,11 +282,11 @@ router.post('/contacts/add', authenticateToken, async (req: AuthenticatedRequest
 
     // Step B+C: Insert or upgrade to 'accepted' if it was pending
     try {
-      await db.insert(contacts).values({ ownerId, contactId, status: 'accepted' })
+      await withRetry(() => db.insert(contacts).values({ ownerId, contactId, status: 'accepted' })
         .onConflictDoUpdate({
           target: [contacts.ownerId, contacts.contactId],
           set: { status: 'accepted' },
-        });
+        }));
     } catch (err: any) {
       // Unexpected DB error (unique violations are handled by onConflictDoUpdate)
       if (err?.code === '23505') {
@@ -320,7 +320,7 @@ router.get('/contacts', authenticateToken, async (req: AuthenticatedRequest, res
 
     // We do an Inner Join here to get the friend's actual username and keys,
     // rather than just returning their UUID from the contacts table.
-    const userContacts = await db
+    const userContacts = await withRetry(() => db
       .select({
         id: users.id,
         username: users.username,
@@ -329,7 +329,7 @@ router.get('/contacts', authenticateToken, async (req: AuthenticatedRequest, res
       })
       .from(contacts)
       .innerJoin(users, eq(contacts.contactId, users.id))
-      .where(eq(contacts.ownerId, userId));
+      .where(eq(contacts.ownerId, userId)));
 
     res.status(200).json(userContacts);
   } catch (error) {
@@ -348,7 +348,7 @@ router.get('/inbox', authenticateToken, async (req: AuthenticatedRequest, res: R
 
     // Fetch all contacts for the user, LEFT-joining conversations to get lastMessageAt.
     // Conversations are keyed by canonically-ordered (user1Id < user2Id) pairs.
-    const inboxRows = await db
+    const inboxRows = await withRetry(() => db
       .select({
         id: users.id,
         username: users.username,
@@ -373,7 +373,7 @@ router.get('/inbox', authenticateToken, async (req: AuthenticatedRequest, res: R
         )
       )
       .where(eq(contacts.ownerId, userId))
-      .orderBy(desc(conversations.lastMessageAt));
+      .orderBy(desc(conversations.lastMessageAt)));
 
     res.status(200).json(inboxRows);
   } catch (error) {
@@ -393,10 +393,10 @@ router.patch('/contacts/:contactId/accept', authenticateToken, async (req: Authe
       return;
     }
 
-    const updated = await db.update(contacts)
+    const updated = await withRetry(() => db.update(contacts)
       .set({ status: 'accepted' })
       .where(and(eq(contacts.ownerId, ownerId), eq(contacts.contactId, contactId)))
-      .returning();
+      .returning());
 
     if (updated.length === 0) {
       res.status(404).json({ error: 'Contact not found.' });
@@ -421,9 +421,9 @@ router.delete('/contacts/:contactId', authenticateToken, async (req: Authenticat
       return;
     }
 
-    const deleted = await db.delete(contacts)
+    const deleted = await withRetry(() => db.delete(contacts)
       .where(and(eq(contacts.ownerId, ownerId), eq(contacts.contactId, contactId)))
-      .returning();
+      .returning());
 
     if (deleted.length === 0) {
       res.status(404).json({ error: 'Contact not found.' });
@@ -457,7 +457,7 @@ router.get('/messages/:user1/:user2', authenticateToken, async (req: Authenticat
     }
 
     // Find all messages where User1 sent to User2, OR User2 sent to User1
-    const chatHistory = await db.select()
+    const chatHistory = await withRetry(() => db.select()
       .from(messages)
       .where(
         or(
@@ -465,7 +465,7 @@ router.get('/messages/:user1/:user2', authenticateToken, async (req: Authenticat
           and(eq(messages.senderId, user2), eq(messages.receiverId, user1))
         )
       )
-      .orderBy(asc(messages.createdAt), asc(messages.id));
+      .orderBy(asc(messages.createdAt), asc(messages.id)));
     
     res.status(200).json(chatHistory);
   } catch (error) {

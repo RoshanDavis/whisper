@@ -21,6 +21,8 @@ interface Message {
   receiverId: string;
   isOwnMessage: boolean;
   isVerified?: boolean;
+  pending?: boolean;   // optimistic entry not yet confirmed by server
+  failed?: boolean;    // server reported a save error
 }
 
 interface ChatAreaProps {
@@ -216,10 +218,36 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
       }
     };
 
+    // Server confirms: replace the optimistic tempId with the real DB id, clear pending flag
+    const handleSaved = (ack: { tempId?: string; message: { id: string } }) => {
+      if (!ack.tempId) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === ack.tempId
+            ? { ...m, id: ack.message.id, pending: false }
+            : m
+        )
+      );
+    };
+
+    // Server reports failure: mark the optimistic message as failed so the UI can show it
+    const handleError = (ack: { tempId?: string; error: string }) => {
+      if (!ack.tempId) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === ack.tempId ? { ...m, pending: false, failed: true } : m
+        )
+      );
+    };
+
     socket.on("receiveMessage", handleReceive);
+    socket.on("messageSaved", handleSaved);
+    socket.on("messageError", handleError);
     return () => {
       isActive = false;
       socket.off("receiveMessage", handleReceive);
+      socket.off("messageSaved", handleSaved);
+      socket.off("messageError", handleError);
     };
   }, [socket, selectedContact, userId, currentUser, ecdhPrivateKey]);
 
@@ -262,6 +290,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
         receiverId: selectedContact.id,
         isOwnMessage: true,
         isVerified: true,
+        pending: true,
       },
     ]);
 
@@ -280,6 +309,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
         ciphertext,
         iv,
         signature,
+        tempId,
       });
     } catch (err) {
       console.error("Send error:", err);
@@ -367,14 +397,21 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
             >
               <div
                 className={`max-w-[70%] px-5 py-3 rounded-2xl shadow-sm wrap-break-word whitespace-pre-wrap ${
-                  !msg.isVerified
-                    ? "bg-secondary-900/50 text-secondary-200 border border-secondary-700 rounded-bl-none"
-                    : msg.isOwnMessage
-                      ? "bg-primary-900 text-primary-50 rounded-br-none"
-                      : `${contactColor} text-primary-50 rounded-bl-none`
+                  msg.failed
+                    ? "bg-red-900/40 text-red-200 border border-red-500/30 rounded-br-none"
+                    : !msg.isVerified
+                      ? "bg-secondary-900/50 text-secondary-200 border border-secondary-700 rounded-bl-none"
+                      : msg.isOwnMessage
+                        ? `bg-primary-900 text-primary-50 rounded-br-none ${msg.pending ? "opacity-60" : ""}`
+                        : `${contactColor} text-primary-50 rounded-bl-none`
                 }`}
               >
                 {msg.text}
+                {msg.failed && (
+                  <div className="text-[10px] text-red-400 mt-1 text-right">
+                    Failed to send
+                  </div>
+                )}
               </div>
             </div>
           ))

@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 
 // Import our database and schema
-import { db } from './db/index';
+import { db, pool, withRetry } from './db/index';
 import { messages, conversations, contacts } from './db/schema';
 import { sql } from 'drizzle-orm';
 
@@ -37,10 +37,10 @@ app.get('/', (req, res) => {
   res.send('Whisper Backend is running securely!');
 });
 
-// Smart health check — proves the DB connection pool is live
+// Smart health check — proves at least one pool connection is live
 app.get('/api/health', async (_req, res) => {
   try {
-    await db.execute(sql`SELECT 1`);
+    await withRetry(() => db.execute(sql`SELECT 1`));
     res.status(200).json({ status: 'ready' });
   } catch (err) {
     console.error('Health Check Error:', (err as Error).message);
@@ -87,20 +87,35 @@ io.use((socket, next) => {
 });
 
 // ── DB keep-alive heartbeat ──
-// Ping the database every 30 s while at least one user is connected.
-// This keeps the pg pool warm so messages/queries never hit a cold connection.
+// While users are connected, periodically check out a client from the pool
+// and run SELECT 1.  If it fails, the pool evicts that dead client automatically.
+// We do this every 15 s — frequent enough that the pool never sits idle long
+// enough for Supabase/PgBouncer to kill the session, but not so aggressive
+// that we waste resources.
+const DB_HEARTBEAT_MS = 15_000;
 let dbHeartbeat: ReturnType<typeof setInterval> | null = null;
 
-function startDbHeartbeat() {
-  if (dbHeartbeat) return; // already running
-  dbHeartbeat = setInterval(async () => {
+async function heartbeatPing() {
+  // Use a raw pool.query so we exercise the actual pool checkout/return cycle.
+  // If the client is dead, pg.Pool will detect the error and discard it.
+  // Retry once so the pool always has at least one warm connection ready.
+  try {
+    await pool.query('SELECT 1');
+  } catch (err) {
+    console.warn('💔 Heartbeat failed, retrying to warm a fresh client…', (err as Error).message);
     try {
-      await db.execute(sql`SELECT 1`);
-    } catch (err) {
-      console.warn('DB heartbeat failed:', (err as Error).message);
+      await pool.query('SELECT 1');
+    } catch (err2) {
+      console.error('💔💔 Heartbeat retry also failed:', (err2 as Error).message);
     }
-  }, 30_000); // every 30 s — well under the 10 s idle timeout
-  console.log('💓 DB heartbeat started');
+  }
+}
+
+function startDbHeartbeat() {
+  if (dbHeartbeat) return;
+  heartbeatPing(); // immediate first ping
+  dbHeartbeat = setInterval(heartbeatPing, DB_HEARTBEAT_MS);
+  console.log(`💓 DB heartbeat started (every ${DB_HEARTBEAT_MS / 1000}s)`);
 }
 
 function stopDbHeartbeat() {
@@ -127,12 +142,13 @@ io.on('connection', (socket) => {
 
 // 2. Listen for incoming ENCRYPTED messages and save them
   // ---> NEW: Added signature to the expected data payload!
-  socket.on('sendMessage', async (data: { receiverId: string, ciphertext: string, iv: string, signature: string }) => {
+  socket.on('sendMessage', async (data: { receiverId: string, ciphertext: string, iv: string, signature: string, tempId?: string }) => {
     try {
       const senderId = socket.data.userId as string;
       
       if (!senderId) {
          console.error('Unauthorized attempt to send a message.');
+         socket.emit('messageError', { tempId: data.tempId, error: 'Unauthorized' });
          return;
       }
 
@@ -141,8 +157,8 @@ io.on('connection', (socket) => {
         ? [senderId, data.receiverId]
         : [data.receiverId, senderId];
 
-      // Helper: run the DB transaction (extracted so we can retry once)
-      const execTransaction = () =>
+      // Transactional write with automatic retry on dead-connection errors
+      const savedMessage = await withRetry(() =>
         db.transaction(async (tx) => {
           const [msg] = await tx.insert(messages).values({
             senderId: senderId,
@@ -161,27 +177,13 @@ io.on('connection', (socket) => {
             });
 
           return msg;
-        });
-
-      // Attempt the transaction; on a dead-connection error, retry once with a fresh connection
-      let savedMessage;
-      try {
-        savedMessage = await execTransaction();
-      } catch (firstErr: any) {
-        const isConnectionDrop =
-          firstErr?.code === 'ECONNRESET' ||
-          firstErr?.code === 'ETIMEDOUT' ||
-          /terminated|connection|reset|timeout/i.test(firstErr?.message ?? '');
-
-        if (isConnectionDrop) {
-          console.warn('⚠️ DB connection dropped — retrying transaction once...');
-          savedMessage = await execTransaction();
-        } else {
-          throw firstErr;
-        }
-      }
+        })
+      );
 
       console.log('✅ Encrypted and signed message saved to database!');
+
+      // Acknowledge success to the sending socket so it can confirm the optimistic entry
+      socket.emit('messageSaved', { tempId: data.tempId, message: savedMessage });
 
       // Resolve connected sockets early so both auto-contact and broadcast can use them
       const senderSockets = connectedUsers.get(senderId);
@@ -189,11 +191,14 @@ io.on('connection', (socket) => {
 
       // Auto-create a pending contact for the receiver so the sender appears in their inbox.
       // Uses onConflictDoNothing so an existing relationship is silently skipped.
-      const insertResult = await db.insert(contacts).values({
-        ownerId: data.receiverId,
-        contactId: senderId,
-        status: 'pending',
-      }).onConflictDoNothing({ target: [contacts.ownerId, contacts.contactId] });
+      // Wrapped in withRetry so a dead connection doesn't silently swallow the insert.
+      const insertResult = await withRetry(() =>
+        db.insert(contacts).values({
+          ownerId: data.receiverId,
+          contactId: senderId,
+          status: 'pending',
+        }).onConflictDoNothing({ target: [contacts.ownerId, contacts.contactId] })
+      );
 
       // Notify receiver only when a new pending contact was actually created
       if (insertResult.rowCount && insertResult.rowCount > 0 && receiverSockets) {
@@ -218,6 +223,8 @@ io.on('connection', (socket) => {
 
     } catch (error) {
       console.error('❌ Error saving message to database:', error);
+      // Tell the sender so the frontend can roll back the optimistic entry
+      socket.emit('messageError', { tempId: data.tempId, error: 'Message failed to send — please try again.' });
     }
   });
 
