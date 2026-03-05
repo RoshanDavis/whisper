@@ -13,51 +13,54 @@ export default function App() {
   const [serverReady, setServerReady] = useState(false);
   const [serverError, setServerError] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [retryTrigger, setRetryTrigger] = useState(false);
 
   const MAX_RETRIES = 10;
+  const FETCH_TIMEOUT = 8000; // 8s per attempt (cold starts can be slow)
 
   // Ping the health endpoint on mount to wake the serverless backend
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     let timerId: ReturnType<typeof setTimeout> | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const scheduleRetry = () => {
+      setRetryCount((c) => {
+        if (c + 1 >= MAX_RETRIES) {
+          setServerError(true);
+          return c + 1;
+        }
+        timerId = setTimeout(ping, 2000);
+        return c + 1;
+      });
+    };
 
     const ping = async () => {
+      // Per-request timeout: abort fetch if it takes too long
+      timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
       try {
-        const res = await fetch(`${API_URL}/api/health`);
-        if (cancelled) return;
+        const res = await fetch(`${API_URL}/api/health`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (controller.signal.aborted) return;
         if (res.ok) {
           setServerReady(true);
         } else {
-          // Non-ok response — retry
-          setRetryCount((c) => {
-            if (c + 1 >= MAX_RETRIES) {
-              setServerError(true);
-              return c + 1;
-            }
-            timerId = setTimeout(ping, 2000);
-            return c + 1;
-          });
+          scheduleRetry();
         }
       } catch {
-        if (cancelled) return;
-        // Network error — retry
-        setRetryCount((c) => {
-          if (c + 1 >= MAX_RETRIES) {
-            setServerError(true);
-            return c + 1;
-          }
-          timerId = setTimeout(ping, 2000);
-          return c + 1;
-        });
+        clearTimeout(timeoutId);
+        if (controller.signal.aborted) return;
+        scheduleRetry();
       }
     };
 
     ping();
     return () => {
-      cancelled = true;
+      controller.abort();
       if (timerId !== undefined) clearTimeout(timerId);
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
     };
-  }, [retryCount === 0]); // re-runs when retryCount is reset to 0 via Retry button
+  }, [retryTrigger]);
 
   if (!serverReady) {
     return (
@@ -66,7 +69,7 @@ export default function App() {
           <>
             <p className="text-sm tracking-wide mb-4">Unable to reach the server. Please try again.</p>
             <button
-              onClick={() => { setServerError(false); setRetryCount(0); }}
+              onClick={() => { setServerError(false); setRetryCount(0); setRetryTrigger((t) => !t); }}
               className="px-4 py-2 bg-primary-700 hover:bg-primary-600 text-primary-50 text-sm font-bold rounded-lg transition-colors"
             >
               Retry
