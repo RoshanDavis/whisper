@@ -8,8 +8,10 @@ dotenv.config();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  connectionTimeoutMillis: 30_000, // 30 s — tolerate slow cold-start routes to Supabase
+  max: 20,                         // Extra headroom during reconnect bursts
+  connectionTimeoutMillis: 5_000,  // 5 s — fail fast if pool is exhausted instead of hanging
   idleTimeoutMillis: 10_000,       // 10 s — aggressively release idle connections before cloud routers drop them
+  query_timeout: 10_000,           // 10 s — force-kill hung queries/transactions to release clients
   keepAlive: true,                 // Prevent cloud networks from silently killing idle TCP sockets
   ssl: {
     rejectUnauthorized: false, // Required for managed providers like Supabase
