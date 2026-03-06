@@ -10,7 +10,9 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 7,                          // Reasonable ceiling — avoids overwhelming Supavisor
   connectionTimeoutMillis: 10_000,       // Fail fast so retries get fresh connections sooner
-  idleTimeoutMillis: 15_000,             // Cycle out idle connections aggressively before they go stale
+  idleTimeoutMillis: 120_000,            // 2 min — stops the constant connect/disconnect churn
+                                         // (15 s was far too aggressive: every idle gap forced a
+                                         // full TCP + TLS + Supavisor handshake on the next query)
   keepAlive: true,                       // OS-level TCP keep-alive probes
   keepAliveInitialDelayMillis: 10_000,   // Probe after 10 s of silence (Linux default is 2 h — way too late for Render)
   query_timeout: 10000,
@@ -35,22 +37,40 @@ pool.on('connect', (client) => {
   });
 });
 
-// Log when a connection is removed and keep the pool warm
+// Debounced pool warmup — prevent thundering herd when multiple connections
+// are evicted simultaneously (e.g., Supavisor restart drops several at once).
+let warmupScheduled = false;
 pool.on('remove', () => {
   console.log(`🗑️ Pool connection removed (total: ${pool.totalCount}, idle: ${pool.idleCount})`);
 
-  // Guarantee there is ALWAYS at least 1 warm connection ready to go.
-  // If the total drops below 2, immediately spin one up in the background.
-  if (pool.totalCount < 2) {
-    console.log('🔥 Spawning background replacement to keep pool warm...');
-    pool.query('SELECT 1').catch((err) => {
-      console.warn('⚠️ Background warmup skipped (network down):', err.message);
-    });
+  if (pool.totalCount < 2 && !warmupScheduled) {
+    warmupScheduled = true;
+    setTimeout(() => {
+      warmupScheduled = false;
+      if (pool.totalCount < 2) {
+        console.log('🔥 Spawning background replacement to keep pool warm...');
+        pool.query('SELECT 1').catch((err) => {
+          console.warn('⚠️ Background warmup skipped (network down):', err.message);
+        });
+      }
+    }, 500);
   }
 });
 
 export const db = drizzle(pool, { schema });
 export { pool };
+
+// ── Application-level heartbeat ──
+// TCP keep-alive only sends OS-level probes — Supavisor, Render's NAT gateway,
+// and AWS load balancers track idle time at the *PostgreSQL wire-protocol* level.
+// A connection that is TCP-alive but hasn't sent a PG query can still be killed
+// by intermediaries.  This heartbeat ensures at least one pool connection stays
+// genuinely active so the pool never goes fully cold.
+const HEARTBEAT_MS = 50_000; // 50 s — well under Supabase's pooler timeout
+setInterval(() => {
+  if (pool.idleCount === 0) return;           // all connections busy — nothing to refresh
+  pool.query('SELECT 1').catch(() => {});      // pg auto-evicts the client on error
+}, HEARTBEAT_MS).unref();                      // .unref() so the timer never blocks graceful shutdown
 
 // ── Resilient query helper ──
 // Retries up to 3 times with backoff on connection-class errors.

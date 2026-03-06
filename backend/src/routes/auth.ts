@@ -1,6 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcrypt';
-import { eq, or, and, asc, desc, sql } from 'drizzle-orm';
+import { eq, and, asc, desc, sql } from 'drizzle-orm';
 import { db, withRetry } from '../db/index';
 import { users, messages, contacts, conversations } from '../db/schema';
 import jwt from 'jsonwebtoken';
@@ -462,14 +462,14 @@ router.get('/messages/:user1/:user2', authenticateToken, async (req: Authenticat
       return;
     }
 
-    // Find all messages where User1 sent to User2, OR User2 sent to User1
+    // Canonical pair: normalise with LEAST/GREATEST so a single index-friendly
+    // equality check replaces the previous OR that forced a sequential scan.
+    const [minId, maxId] = user1 < user2 ? [user1, user2] : [user2, user1];
+
     const chatHistory = await withRetry(() => db.select()
       .from(messages)
       .where(
-        or(
-          and(eq(messages.senderId, user1), eq(messages.receiverId, user2)),
-          and(eq(messages.senderId, user2), eq(messages.receiverId, user1))
-        )
+        sql`least(${messages.senderId}, ${messages.receiverId}) = ${minId} AND greatest(${messages.senderId}, ${messages.receiverId}) = ${maxId}`
       )
       .orderBy(asc(messages.createdAt), asc(messages.id)));
     

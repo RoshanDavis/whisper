@@ -36,11 +36,12 @@ app.get('/', (req, res) => {
   res.send('Whisper Backend is running securely!');
 });
 
-// Health check — try once, fail fast. The frontend polls every 4 s so there's
-// no need for retries here; a quick 503 lets the next poll try again.
+// Health check — try once with a tight timeout so it doesn't hog a pool slot
+// during cold-start contention.  The frontend polls every 4 s so a quick 503
+// lets the next poll try again.
 app.get('/api/health', async (_req, res) => {
   try {
-    await pool.query('SELECT 1');
+    await pool.query({ text: 'SELECT 1', query_timeout: 4000 } as any);
     res.status(200).json({ status: 'ready' });
   } catch (err) {
     console.error('Health Check Error:', (err as Error).message);

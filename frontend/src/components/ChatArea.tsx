@@ -147,7 +147,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
     return () => {
       controller.abort();
     };
-  }, [selectedContact, userId, currentUser, ecdhPrivateKey]);
+  }, [selectedContact?.id, userId]);
 
   useEffect(() => {
     if (!socket || !selectedContact || !userId || !currentUser || !ecdhPrivateKey) return;
@@ -255,7 +255,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
       socket.off("messageSaved", handleSaved);
       socket.off("messageError", handleError);
     };
-  }, [socket, selectedContact, userId, currentUser, ecdhPrivateKey]);
+  }, [socket, selectedContact?.id, userId]);
 
   // Auto-resize textarea
   useEffect(() => {
