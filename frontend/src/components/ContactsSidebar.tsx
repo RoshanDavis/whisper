@@ -63,7 +63,7 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
 
   // Re-fetch inbox when a new message arrives (updates lastActive ordering).
   // Debounce to collapse rapid updates (e.g., burst of messages) into one fetch.
-  const fetchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const fetchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     if (!socket) return;
     const debouncedFetch = () => {
