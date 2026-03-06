@@ -36,6 +36,7 @@ export const messages = pgTable('messages', {
 }, (table) => [
   index('messages_sender_receiver_idx').on(table.senderId, table.receiverId),
   index('messages_receiver_created_idx').on(table.receiverId, table.createdAt),
+  index('messages_created_at_idx').on(table.createdAt),
 ]);
 
 export const contacts = pgTable('contacts', {
@@ -54,6 +55,7 @@ export const contacts = pgTable('contacts', {
 }, (table) => [
   unique('owner_contact_unique').on(table.ownerId, table.contactId),
   index('contacts_owner_idx').on(table.ownerId),
+  index('contacts_owner_contact_idx').on(table.ownerId, table.contactId),
 ]);
 
 // --- READ-OPTIMIZED UNIFIED INBOX ---
@@ -68,5 +70,6 @@ export const conversations = pgTable('conversations', {
 }, (table) => [
   unique('conversations_pair_unique').on(table.user1Id, table.user2Id),
   index('conversations_last_message_idx').on(table.lastMessageAt),
+  index('conversations_pair_idx').on(table.user1Id, table.user2Id),
   check('user1_lt_user2', sql`${table.user1Id} < ${table.user2Id}`),
 ]);

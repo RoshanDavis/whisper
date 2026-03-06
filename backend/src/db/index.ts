@@ -10,7 +10,7 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 7,                          // Reasonable ceiling — avoids overwhelming Supavisor
   connectionTimeoutMillis: 10_000,       // Fail fast so retries get fresh connections sooner
-  idleTimeoutMillis: 30_000,             // Close idle connections after 30 s — beats Render's NAT timeout
+  idleTimeoutMillis: 15_000,             // Cycle out idle connections aggressively before they go stale
   keepAlive: true,                       // OS-level TCP keep-alive probes
   keepAliveInitialDelayMillis: 10_000,   // Probe after 10 s of silence (Linux default is 2 h — way too late for Render)
   query_timeout: 10000,
