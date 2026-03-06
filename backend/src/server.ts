@@ -95,9 +95,15 @@ const DB_HEARTBEAT_MS = 8_000;
 let dbHeartbeat: ReturnType<typeof setInterval> | null = null;
 
 async function heartbeatPing() {
+  // Back off when the pool is under pressure — pinging would only compete
+  // with real queries for the limited connection slots, making things worse.
+  if (pool.waitingCount > 0 || pool.idleCount === 0) {
+    console.log(`⏸️ Heartbeat skipped (idle: ${pool.idleCount}, waiting: ${pool.waitingCount}, total: ${pool.totalCount})`);
+    return;
+  }
+
   // Ping once per idle client so EVERY connection stays warm.
-  // With max:2, this is at most 2 parallel SELECT 1 queries.
-  const count = pool.idleCount || 1;
+  const count = pool.idleCount;
   const pings: Promise<void>[] = [];
   for (let i = 0; i < count; i++) {
     pings.push(

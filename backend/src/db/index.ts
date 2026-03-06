@@ -9,7 +9,7 @@ dotenv.config();
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 2,                               // 2 connections — enough concurrency, within free tier limits
-  connectionTimeoutMillis: 30_000,       // 30 s — tolerate cold start of Supabase pooler
+  connectionTimeoutMillis: 10_000,       // 10 s — fail fast so retries get fresh connections sooner
   idleTimeoutMillis: 0,                  // NEVER close from our side — heartbeat keeps them alive on Supavisor's side
   allowExitOnIdle: false,                // NEVER drain the pool — keep connections ready at all times
   keepAlive: true,                       // TCP keepalive probes
@@ -50,8 +50,12 @@ export async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promi
     } catch (err: any) {
       const msg = `${err?.code ?? ''} ${err?.message ?? ''}`;
       if (attempt < maxAttempts && RETRYABLE.test(msg)) {
-        const delay = Math.min(200 * Math.pow(2, attempt - 1), 2000); // 200ms → 400ms
-        console.warn(`⚠️ DB error (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms …`, err.message);
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // 1s → 2s → 4s
+        console.warn(
+          `⚠️ DB error (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms …`,
+          `[pool: total=${pool.totalCount} idle=${pool.idleCount} waiting=${pool.waitingCount}]`,
+          err.message,
+        );
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }

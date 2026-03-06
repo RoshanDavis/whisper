@@ -9,7 +9,7 @@ import Settings from './pages/Settings';
 import About from './pages/About';
 
 const POLL_INTERVAL = 4000; // 4 s between health pings
-const FETCH_TIMEOUT = 35000; // 35 s per attempt — must exceed backend's 30 s connectionTimeoutMillis
+const FETCH_TIMEOUT = 15000; // 15 s per attempt — must exceed backend's 10 s connectionTimeoutMillis
 
 export default function App() {
   const { isAuthenticated } = useAuth();
