@@ -9,9 +9,12 @@ dotenv.config();
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 15,                          // Reasonable ceiling — avoids overwhelming Supavisor
-  connectionTimeoutMillis: 10_000,  // Fail fast so retries get fresh connections sooner
-  idleTimeoutMillis: 30_000,        // Close idle connections after 30 s — beats Render's NAT timeout
-  keepAlive: true,                  // OS-level TCP keep-alive probes
+  connectionTimeoutMillis: 10_000,       // Fail fast so retries get fresh connections sooner
+  idleTimeoutMillis: 30_000,             // Close idle connections after 30 s — beats Render's NAT timeout
+  keepAlive: true,                       // OS-level TCP keep-alive probes
+  keepAliveInitialDelayMillis: 10_000,   // Probe after 10 s of silence (Linux default is 2 h — way too late for Render)
+  query_timeout: 10000,
+  statement_timeout: 10000,
   ssl: {
     rejectUnauthorized: false,
   },
@@ -46,13 +49,13 @@ export async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promi
     try {
       return await fn();
     } catch (err: any) {
-      const msg = `${err?.code ?? ''} ${err?.message ?? ''}`;
+      const msg = `${err?.code ?? ''} ${err?.message ?? ''} ${err?.cause?.message ?? ''}`;
       if (attempt < maxAttempts && RETRYABLE.test(msg)) {
         const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // 1s → 2s → 4s
         console.warn(
           `⚠️ DB error (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms …`,
           `[pool: total=${pool.totalCount} idle=${pool.idleCount} waiting=${pool.waitingCount}]`,
-          err.message,
+          err?.cause?.message || err.message,
         );
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
