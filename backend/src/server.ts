@@ -9,7 +9,6 @@ import jwt from 'jsonwebtoken';
 // Import our database and schema
 import { db, pool, withRetry } from './db/index';
 import { messages, conversations, contacts } from './db/schema';
-import { sql } from 'drizzle-orm';
 
 import authRoutes from './routes/auth';
 
@@ -37,10 +36,11 @@ app.get('/', (req, res) => {
   res.send('Whisper Backend is running securely!');
 });
 
-// Smart health check — proves at least one pool connection is live
+// Health check — try once, fail fast. The frontend polls every 4 s so there's
+// no need for retries here; a quick 503 lets the next poll try again.
 app.get('/api/health', async (_req, res) => {
   try {
-    await withRetry(() => db.execute(sql`SELECT 1`));
+    await pool.query('SELECT 1');
     res.status(200).json({ status: 'ready' });
   } catch (err) {
     console.error('Health Check Error:', (err as Error).message);
@@ -87,22 +87,35 @@ io.use((socket, next) => {
 });
 
 // ── DB keep-alive heartbeat ──
-// With max:1, there is exactly ONE pool connection. The heartbeat pings it
-// every 8 s to prevent Render's network layer and Supavisor from killing it.
-// If the ping fails, the pool evicts the dead client and the next query
-// (or the next heartbeat) will open a fresh replacement.
+// Render’s NAT gateway silently drops idle TCP sockets after ~30–60 s.
+// The heartbeat pings ALL idle pool connections every 8 s so they never
+// appear “idle” to Render or Supavisor.  If a ping fails the pool evicts
+// the dead client and the next checkout opens a fresh replacement.
 const DB_HEARTBEAT_MS = 8_000;
 let dbHeartbeat: ReturnType<typeof setInterval> | null = null;
 
 async function heartbeatPing() {
-  try {
-    await pool.query('SELECT 1');
-  } catch (err) {
-    console.warn('💔 Heartbeat: dead connection evicted, pool will reconnect on next use:', (err as Error).message);
+  // Ping once per idle client so EVERY connection stays warm.
+  // With max:2, this is at most 2 parallel SELECT 1 queries.
+  const count = pool.idleCount || 1;
+  const pings: Promise<void>[] = [];
+  for (let i = 0; i < count; i++) {
+    pings.push(
+      pool.query('SELECT 1').then(() => {}).catch((err) => {
+        console.warn('💔 Heartbeat: dead client evicted:', (err as Error).message);
+      })
+    );
   }
+  await Promise.allSettled(pings);
 }
 
+// Grace period: when last user disconnects, wait 30 s before stopping heartbeat.
+// This avoids thrashing if a user briefly disconnects (network blip, tab reload).
+let heartbeatStopTimer: ReturnType<typeof setTimeout> | null = null;
+
 function startDbHeartbeat() {
+  // Cancel any pending stop
+  if (heartbeatStopTimer) { clearTimeout(heartbeatStopTimer); heartbeatStopTimer = null; }
   if (dbHeartbeat) return;
   heartbeatPing(); // immediate first ping
   dbHeartbeat = setInterval(heartbeatPing, DB_HEARTBEAT_MS);
@@ -110,10 +123,17 @@ function startDbHeartbeat() {
 }
 
 function stopDbHeartbeat() {
-  if (!dbHeartbeat) return;
-  clearInterval(dbHeartbeat);
-  dbHeartbeat = null;
-  console.log('💤 DB heartbeat stopped (no connected users)');
+  // Defer actual stop by 30 s so brief disconnects don't kill the pool
+  if (heartbeatStopTimer) return; // already scheduled
+  heartbeatStopTimer = setTimeout(() => {
+    heartbeatStopTimer = null;
+    // Re-check: a new user may have connected during the grace period
+    if (connectedUsers.size > 0) return;
+    if (!dbHeartbeat) return;
+    clearInterval(dbHeartbeat);
+    dbHeartbeat = null;
+    console.log('💤 DB heartbeat stopped (no connected users for 30 s)');
+  }, 30_000);
 }
 
 io.on('connection', (socket) => {
@@ -235,4 +255,12 @@ const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, () => {
   console.log(`🚀 Server is listening on http://localhost:${PORT}`);
+
+  // Pre-warm the pool immediately so the first health check doesn't pay the
+  // full TCP + TLS handshake cost.  pg.Pool is lazy — it creates zero
+  // connections until something asks for one.  This fire-and-forget query
+  // forces the first connection open while Render is still routing traffic.
+  pool.query('SELECT 1')
+    .then(() => console.log('✅ Pool pre-warmed — DB connection ready'))
+    .catch((err: Error) => console.warn('⚠️ Pool pre-warm failed (will retry on first query):', err.message));
 });
