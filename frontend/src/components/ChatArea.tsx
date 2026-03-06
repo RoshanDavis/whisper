@@ -38,6 +38,25 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Cache derived crypto keys per contact to avoid redundant WebCrypto operations
+  const cryptoCacheRef = useRef<{
+    contactId: string;
+    publicKey: CryptoKey;
+    publicSigningKey: CryptoKey;
+    sharedSecret: CryptoKey;
+  } | null>(null);
+
+  const getCryptoKeys = async (contact: Contact) => {
+    const cached = cryptoCacheRef.current;
+    if (cached && cached.contactId === contact.id) return cached;
+    const pubKey = await importPublicKey(contact.publicKey);
+    const sigKey = await importEcdsaPublicKey(contact.publicSigningKey);
+    const shared = await deriveSharedSecret(ecdhPrivateKey!, pubKey);
+    const entry = { contactId: contact.id, publicKey: pubKey, publicSigningKey: sigKey, sharedSecret: shared };
+    cryptoCacheRef.current = entry;
+    return entry;
+  };
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -46,8 +65,9 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
   useEffect(() => {
     if (!selectedContact || !userId || !currentUser || !ecdhPrivateKey) return;
 
-    // Clear stale messages from previous contact immediately
+    // Clear stale messages and crypto cache from previous contact
     setMessages([]);
+    cryptoCacheRef.current = null;
 
     // Snapshot the current contact to detect stale responses
     const contactId = selectedContact.id;
@@ -66,15 +86,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
         }
         const encryptedHistory = await res.json();
 
-        const publicKey = await importPublicKey(selectedContact.publicKey);
-        if (controller.signal.aborted) return;
-
-        const publicSigningKey = await importEcdsaPublicKey(
-          selectedContact.publicSigningKey,
-        );
-        if (controller.signal.aborted) return;
-
-        const sharedSecret = await deriveSharedSecret(ecdhPrivateKey, publicKey);
+        const keys = await getCryptoKeys(selectedContact);
         if (controller.signal.aborted) return;
 
         const decryptedMessages: Message[] = [];
@@ -87,7 +99,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
 
             if (!isOwn) {
               isValid = await verifySignature(
-                publicSigningKey,
+                keys.publicSigningKey,
                 msg.signature,
                 msg.ciphertext,
               );
@@ -95,7 +107,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
             }
 
             const text = await decryptMessage(
-              sharedSecret,
+              keys.sharedSecret,
               msg.ciphertext,
               msg.iv,
             );
@@ -155,17 +167,13 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
       if (!isInbound && !isOwnEcho) return;
 
       try {
-        const publicKey = await importPublicKey(selectedContact.publicKey);
-        if (!isActive) return;
-        const publicSigningKey = await importEcdsaPublicKey(
-          selectedContact.publicSigningKey,
-        );
+        const keys = await getCryptoKeys(selectedContact);
         if (!isActive) return;
 
         // Only verify signature on messages from the contact (not our own echoes)
         if (isInbound) {
           const isValidSignature = await verifySignature(
-            publicSigningKey,
+            keys.publicSigningKey,
             savedMessage.signature,
             savedMessage.ciphertext,
           );
@@ -174,10 +182,8 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
             throw new Error("SECURITY ALERT: Invalid signature!");
         }
 
-        const sharedSecret = await deriveSharedSecret(ecdhPrivateKey, publicKey);
-        if (!isActive) return;
         const decryptedText = await decryptMessage(
-          sharedSecret,
+          keys.sharedSecret,
           savedMessage.ciphertext,
           savedMessage.iv,
         );
@@ -295,11 +301,9 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
     ]);
 
     try {
-      const publicKey = await importPublicKey(selectedContact.publicKey);
-
-      const sharedSecret = await deriveSharedSecret(ecdhPrivateKey, publicKey);
+      const keys = await getCryptoKeys(selectedContact);
       const { ciphertext, iv } = await encryptMessage(
-        sharedSecret,
+        keys.sharedSecret,
         textToEncrypt,
       );
       const signature = await signData(ecdsaPrivateKey, ciphertext);

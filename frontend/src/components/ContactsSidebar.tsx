@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import { getContactColor } from '../utils/contactColor';
@@ -61,16 +61,21 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
     return () => { controller.abort(); };
   }, [userId, fetchInbox]);
 
-  // Re-fetch inbox when a new message arrives (updates lastActive ordering)
+  // Re-fetch inbox when a new message arrives (updates lastActive ordering).
+  // Debounce to collapse rapid updates (e.g., burst of messages) into one fetch.
+  const fetchTimerRef = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
     if (!socket) return;
-    const handleReceiveMessage = () => { fetchInbox(); };
-    const handleInboxUpdated = () => { fetchInbox(); };
-    socket.on('receiveMessage', handleReceiveMessage);
-    socket.on('inboxUpdated', handleInboxUpdated);
+    const debouncedFetch = () => {
+      if (fetchTimerRef.current) clearTimeout(fetchTimerRef.current);
+      fetchTimerRef.current = setTimeout(() => fetchInbox(), 300);
+    };
+    socket.on('receiveMessage', debouncedFetch);
+    socket.on('inboxUpdated', debouncedFetch);
     return () => {
-      socket.off('receiveMessage', handleReceiveMessage);
-      socket.off('inboxUpdated', handleInboxUpdated);
+      socket.off('receiveMessage', debouncedFetch);
+      socket.off('inboxUpdated', debouncedFetch);
+      if (fetchTimerRef.current) clearTimeout(fetchTimerRef.current);
     };
   }, [socket, fetchInbox]);
 

@@ -71,15 +71,11 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'All cryptographic fields are required.' });
     }
 
-    const existingUser = await withRetry(() => db.select().from(users).where(eq(users.username, username)).limit(1));
-    
-    if (existingUser.length > 0) {
-      return res.status(409).json({ error: 'Username already exists. Please choose another.' });
-    }
-
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
+    // Atomic insert — the UNIQUE constraint on username prevents duplicates
+    // without a separate SELECT (avoids TOCTOU race condition).
     const newUser = await withRetry(() => db.insert(users).values({
       username,
       passwordHash,
@@ -90,10 +86,14 @@ router.post('/register', async (req, res) => {
       publicSigningKey,
       encryptedSigningPrivateKey,
       signingKeyIv
-    }).returning({
+    }).onConflictDoNothing({ target: users.username }).returning({
       id: users.id,
       username: users.username,
     }));
+
+    if (newUser.length === 0) {
+      return res.status(409).json({ error: 'Username already exists. Please choose another.' });
+    }
 
     res.status(201).json({ 
       message: 'User registered successfully!', 
@@ -177,7 +177,17 @@ router.post('/login', async (req, res) => {
 router.get('/me', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const existingUser = await withRetry(() => db.select().from(users).where(eq(users.id, userId)).limit(1));
+    const existingUser = await withRetry(() => db.select({
+      id: users.id,
+      username: users.username,
+      publicKey: users.publicKey,
+      encryptedPrivateKey: users.encryptedPrivateKey,
+      keyIv: users.keyIv,
+      keySalt: users.keySalt,
+      publicSigningKey: users.publicSigningKey,
+      encryptedSigningPrivateKey: users.encryptedSigningPrivateKey,
+      signingKeyIv: users.signingKeyIv,
+    }).from(users).where(eq(users.id, userId)).limit(1));
     const user = existingUser[0];
 
     if (!user) {
@@ -231,16 +241,16 @@ router.post('/logout', (req, res) => {
 // Fetch BOTH Public Keys (Encryption & Signing) by user ID
 router.get('/users/:id/key', async (req, res) => {
   try {
-    const targetUser = await withRetry(() => db.select().from(users).where(eq(users.id, req.params.id)).limit(1));
+    const targetUser = await withRetry(() => db.select({
+      publicKey: users.publicKey,
+      publicSigningKey: users.publicSigningKey,
+    }).from(users).where(eq(users.id, req.params.id)).limit(1));
     
     if (targetUser.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
     
-    res.status(200).json({ 
-      publicKey: targetUser[0].publicKey,
-      publicSigningKey: targetUser[0].publicSigningKey 
-    });
+    res.status(200).json(targetUser[0]);
   } catch (error) {
     console.error('Error fetching public keys:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -347,7 +357,9 @@ router.get('/inbox', authenticateToken, async (req: AuthenticatedRequest, res: R
     const userId = req.user!.userId;
 
     // Fetch all contacts for the user, LEFT-joining conversations to get lastMessageAt.
-    // Conversations are keyed by canonically-ordered (user1Id < user2Id) pairs.
+    // Conversations are keyed by canonically-ordered (user1Id < user2Id) pairs,
+    // so we use LEAST/GREATEST to compute the canonical key directly — this lets
+    // PostgreSQL use the conversations_pair_unique index instead of a full scan.
     const inboxRows = await withRetry(() => db
       .select({
         id: users.id,
@@ -361,15 +373,9 @@ router.get('/inbox', authenticateToken, async (req: AuthenticatedRequest, res: R
       .innerJoin(users, eq(contacts.contactId, users.id))
       .leftJoin(
         conversations,
-        or(
-          and(
-            eq(conversations.user1Id, contacts.ownerId),
-            eq(conversations.user2Id, contacts.contactId)
-          ),
-          and(
-            eq(conversations.user1Id, contacts.contactId),
-            eq(conversations.user2Id, contacts.ownerId)
-          )
+        and(
+          sql`${conversations.user1Id} = least(${contacts.ownerId}, ${contacts.contactId})`,
+          sql`${conversations.user2Id} = greatest(${contacts.ownerId}, ${contacts.contactId})`
         )
       )
       .where(eq(contacts.ownerId, userId))

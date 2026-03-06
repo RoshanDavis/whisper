@@ -110,6 +110,12 @@ io.on('connection', (socket) => {
          return;
       }
 
+      // Validate receiverId format before hitting the database
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.receiverId)) {
+        socket.emit('messageError', { tempId: data.tempId, error: 'Invalid receiver.' });
+        return;
+      }
+
       // Canonical pair ordering: user1Id < user2Id (matches CHECK constraint)
       const [user1Id, user2Id] = senderId < data.receiverId
         ? [senderId, data.receiverId]

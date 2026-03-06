@@ -8,7 +8,7 @@ dotenv.config();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 15,                          // Reasonable ceiling — avoids overwhelming Supavisor
+  max: 7,                          // Reasonable ceiling — avoids overwhelming Supavisor
   connectionTimeoutMillis: 10_000,       // Fail fast so retries get fresh connections sooner
   idleTimeoutMillis: 30_000,             // Close idle connections after 30 s — beats Render's NAT timeout
   keepAlive: true,                       // OS-level TCP keep-alive probes

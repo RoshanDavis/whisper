@@ -38,8 +38,6 @@ export const messages = pgTable('messages', {
   index('messages_receiver_created_idx').on(table.receiverId, table.createdAt),
 ]);
 
-// Add this to the bottom of backend/src/db/schema.ts
-
 export const contacts = pgTable('contacts', {
   id: uuid('id').primaryKey().defaultRandom(),
   
