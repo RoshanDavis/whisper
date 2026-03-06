@@ -68,7 +68,7 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
     if (!socket) return;
     const debouncedFetch = () => {
       if (fetchTimerRef.current) clearTimeout(fetchTimerRef.current);
-      fetchTimerRef.current = setTimeout(() => fetchInbox(), 300);
+      fetchTimerRef.current = setTimeout(() => fetchInbox(undefined), 300);
     };
     socket.on('receiveMessage', debouncedFetch);
     socket.on('inboxUpdated', debouncedFetch);
