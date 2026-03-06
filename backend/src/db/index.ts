@@ -26,13 +26,27 @@ pool.on('error', (err) => {
 });
 
 // Log every fresh TCP connection for observability
-pool.on('connect', () => {
+pool.on('connect', (client) => {
   console.log('🔗 New pool connection established');
+
+  // Catch orphaned socket errors so they don't crash the Node process
+  client.on('error', (err) => {
+    console.warn('⚠️ Orphaned client error caught:', err.message);
+  });
 });
 
-// Log when a connection is removed (will show why connections die)
+// Log when a connection is removed and keep the pool warm
 pool.on('remove', () => {
   console.log(`🗑️ Pool connection removed (total: ${pool.totalCount}, idle: ${pool.idleCount})`);
+
+  // Guarantee there is ALWAYS at least 1 warm connection ready to go.
+  // If the total drops below 2, immediately spin one up in the background.
+  if (pool.totalCount < 2) {
+    console.log('🔥 Spawning background replacement to keep pool warm...');
+    pool.query('SELECT 1').catch((err) => {
+      console.warn('⚠️ Background warmup skipped (network down):', err.message);
+    });
+  }
 });
 
 export const db = drizzle(pool, { schema });
