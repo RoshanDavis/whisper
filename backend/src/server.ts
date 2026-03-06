@@ -86,70 +86,11 @@ io.use((socket, next) => {
   }
 });
 
-// ── DB keep-alive heartbeat ──
-// Render’s NAT gateway silently drops idle TCP sockets after ~30–60 s.
-// The heartbeat pings ALL idle pool connections every 8 s so they never
-// appear “idle” to Render or Supavisor.  If a ping fails the pool evicts
-// the dead client and the next checkout opens a fresh replacement.
-const DB_HEARTBEAT_MS = 8_000;
-let dbHeartbeat: ReturnType<typeof setInterval> | null = null;
-
-async function heartbeatPing() {
-  // Back off when the pool is under pressure — pinging would only compete
-  // with real queries for the limited connection slots, making things worse.
-  if (pool.waitingCount > 0 || pool.idleCount === 0) {
-    console.log(`⏸️ Heartbeat skipped (idle: ${pool.idleCount}, waiting: ${pool.waitingCount}, total: ${pool.totalCount})`);
-    return;
-  }
-
-  // Ping once per idle client so EVERY connection stays warm.
-  const count = pool.idleCount;
-  const pings: Promise<void>[] = [];
-  for (let i = 0; i < count; i++) {
-    pings.push(
-      pool.query('SELECT 1').then(() => {}).catch((err) => {
-        console.warn('💔 Heartbeat: dead client evicted:', (err as Error).message);
-      })
-    );
-  }
-  await Promise.allSettled(pings);
-}
-
-// Grace period: when last user disconnects, wait 30 s before stopping heartbeat.
-// This avoids thrashing if a user briefly disconnects (network blip, tab reload).
-let heartbeatStopTimer: ReturnType<typeof setTimeout> | null = null;
-
-function startDbHeartbeat() {
-  // Cancel any pending stop
-  if (heartbeatStopTimer) { clearTimeout(heartbeatStopTimer); heartbeatStopTimer = null; }
-  if (dbHeartbeat) return;
-  heartbeatPing(); // immediate first ping
-  dbHeartbeat = setInterval(heartbeatPing, DB_HEARTBEAT_MS);
-  console.log(`💓 DB heartbeat started (every ${DB_HEARTBEAT_MS / 1000}s)`);
-}
-
-function stopDbHeartbeat() {
-  // Defer actual stop by 30 s so brief disconnects don't kill the pool
-  if (heartbeatStopTimer) return; // already scheduled
-  heartbeatStopTimer = setTimeout(() => {
-    heartbeatStopTimer = null;
-    // Re-check: a new user may have connected during the grace period
-    if (connectedUsers.size > 0) return;
-    if (!dbHeartbeat) return;
-    clearInterval(dbHeartbeat);
-    dbHeartbeat = null;
-    console.log('💤 DB heartbeat stopped (no connected users for 30 s)');
-  }, 30_000);
-}
-
 io.on('connection', (socket) => {
   const userId = socket.data.userId as string;
   if (!connectedUsers.has(userId)) connectedUsers.set(userId, new Set());
   connectedUsers.get(userId)!.add(socket.id);
   console.log(`🔌 User ${userId} connected on socket ${socket.id}`);
-
-  // Start the heartbeat as soon as the first user connects
-  startDbHeartbeat();
 
   // Keep registerUser for backward compat but ignore the userId param (use authenticated one)
   socket.on('registerUser', () => {
@@ -252,8 +193,6 @@ io.on('connection', (socket) => {
       sockets.delete(socket.id);
       if (sockets.size === 0) connectedUsers.delete(userId);
     }
-    // Stop the heartbeat when no users are connected (let the pool + server idle naturally)
-    if (connectedUsers.size === 0) stopDbHeartbeat();
   });
 });
 

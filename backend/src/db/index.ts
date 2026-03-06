@@ -8,12 +8,10 @@ dotenv.config();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 2,                               // 2 connections — enough concurrency, within free tier limits
-  connectionTimeoutMillis: 10_000,       // 10 s — fail fast so retries get fresh connections sooner
-  idleTimeoutMillis: 0,                  // NEVER close from our side — heartbeat keeps them alive on Supavisor's side
-  allowExitOnIdle: false,                // NEVER drain the pool — keep connections ready at all times
-  keepAlive: true,                       // TCP keepalive probes
-  keepAliveInitialDelayMillis: 10_000,   // Probe after 10 s of silence
+  max: 15,                          // Reasonable ceiling — avoids overwhelming Supavisor
+  connectionTimeoutMillis: 10_000,  // Fail fast so retries get fresh connections sooner
+  idleTimeoutMillis: 30_000,        // Close idle connections after 30 s — beats Render's NAT timeout
+  keepAlive: true,                  // OS-level TCP keep-alive probes
   ssl: {
     rejectUnauthorized: false,
   },
@@ -21,7 +19,7 @@ const pool = new Pool({
 
 // Mandatory: discard broken idle clients instead of crashing the process
 pool.on('error', (err) => {
-  console.error('⚠️ Idle client error (discarded):', err.message);
+  console.error('⚠️ Idle client error (handled natively by pg):', err.message);
 });
 
 // Log every fresh TCP connection for observability
