@@ -15,7 +15,7 @@ export interface Contact {
 
 interface ContactsSidebarProps {
   selectedContact: Contact | null;
-  setSelectedContact: (contact: Contact) => void;
+  setSelectedContact: (contact: Contact | null) => void;
 }
 
 export default function ContactsSidebar({ selectedContact, setSelectedContact }: ContactsSidebarProps) {
@@ -99,7 +99,7 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
       if (!res.ok) throw new Error('Failed to remove');
       // If the rejected contact was selected, deselect them
       if (selectedContact?.id === contactId) {
-        setSelectedContact(null as any);
+        setSelectedContact(null);
       }
       await fetchInbox();
     } catch (err) {
@@ -142,7 +142,7 @@ export default function ContactsSidebar({ selectedContact, setSelectedContact }:
   );
 
   return (
-    <div className="w-1/3 max-w-sm h-full bg-primary-950 border border-primary-50 rounded-xl flex flex-col relative shrink-0 ml-5">
+    <div className="w-full md:w-1/3 md:max-w-sm h-full bg-primary-950 border border-primary-50 rounded-2xl md:rounded-xl flex flex-col relative shrink-0 md:ml-5">
       <div className="p-4 flex flex-col gap-4">
         <h2 className="text-primary-50 font-bold text-lg text-center mt-4 tracking-wide">Contacts</h2>
         
