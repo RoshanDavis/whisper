@@ -127,6 +127,28 @@ export default function Navbar() {
               </p>
             </div>
 
+            <div className="md:hidden border-b border-primary-50 mb-1 py-1">
+              {navItems.map((item) => {
+                const isActive = location.pathname === item.path;
+
+                return (
+                  <Link
+                    key={`mobile-${item.path}`}
+                    to={item.path}
+                    onClick={() => setIsDropdownOpen(false)}
+                    className={`w-full text-left px-4 py-2 text-sm transition-colors flex items-center gap-2 ${
+                      isActive
+                        ? "text-primary-50 bg-primary-800"
+                        : "text-primary-100 hover:bg-primary-800 hover:text-primary-50"
+                    }`}
+                  >
+                    <span className="shrink-0">{item.icon}</span>
+                    <span>{item.name}</span>
+                  </Link>
+                );
+              })}
+            </div>
+
             <button
               onClick={handleLogout}
               className="w-full text-left px-4 py-2 text-sm text-secondary-400 hover:bg-primary-800 hover:text-secondary-300 transition-colors flex items-center gap-2"
