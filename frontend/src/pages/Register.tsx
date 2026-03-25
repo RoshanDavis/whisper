@@ -72,7 +72,7 @@ export default function Register() {
         <h2 className="text-3xl font-bold text-white text-center mb-2 tracking-wide">
           Whisper
         </h2>
-        <p className="text-center text-sm text-gray-400 mb-8">Generate your secure cryptographic identity.</p>
+        <p className="text-center text-sm text-gray-400 mb-8">Create your account.</p>
         
         <form onSubmit={handleRegister} className="space-y-5">
           <div>
@@ -88,7 +88,7 @@ export default function Register() {
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-1 pl-1">Master Password</label>
+            <label className="block text-sm font-medium text-gray-400 mb-1 pl-1">Password</label>
             <input
               type="password"
               required
@@ -111,13 +111,13 @@ export default function Register() {
               disabled={isLoading}
               className="w-full bg-brand hover:bg-brand-hover text-white font-bold py-3 px-4 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_var(--color-brand-glow)]"
             >
-              {isLoading ? 'Generating Keys...' : 'Create Secure Account'}
+              {isLoading ? 'Generating Keys...' : 'Create Account'}
             </button>
           </div>
         </form>
 
         <p className="mt-8 text-center text-sm text-gray-400">
-          Already have an identity?{' '}
+          Already have an account?{' '}
           <Link to="/login" className="text-brand hover:text-brand-hover font-semibold transition-colors">
             Sign In
           </Link>

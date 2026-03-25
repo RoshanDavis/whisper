@@ -43,16 +43,16 @@ export default function Navbar() {
         </svg>
       ),
     },
-    {
-      name: "Settings",
-      path: "/settings",
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-        </svg>
-      ),
-    },
+    // {
+    //   name: "Settings",
+    //   path: "/settings",
+    //   icon: (
+    //     <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+    //       <circle cx="12" cy="12" r="3" />
+    //       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    //     </svg>
+    //   ),
+    // },
     {
       name: "About",
       path: "/about",
@@ -103,8 +103,6 @@ export default function Navbar() {
 
       <div className="flex items-center gap-4 relative" ref={dropdownRef}>
         <div className="flex items-center gap-2">
-          <span className="text-sm text-primary-50">User</span>
-
           <button
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
             className="w-8 h-8 rounded-full bg-primary-700 flex items-center justify-center text-white font-bold text-sm shadow-[0_0_10px_var(--color-brand-glow)] hover:ring-2 hover:ring-primary-300 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
@@ -121,13 +119,12 @@ export default function Navbar() {
           <div
             id="user-menu"
             role="menu"
-            className="absolute right-0 top-12 mt-2 w-48 bg-primary-950 border border-primary-50 rounded-xl shadow-lg py-2 z-50 overflow-hidden origin-top-right animate-in fade-in slide-in-from-top-2"
+            className="absolute right-0 top-7 mt-2 w-48 bg-primary-950 border border-primary-50 rounded-xl shadow-lg py-2 z-50 overflow-hidden origin-top-right animate-in fade-in slide-in-from-top-2"
           >
             <div className="px-4 py-2 border-b border-primary-50 mb-1">
               <p className="text-sm text-primary-50 font-medium truncate">
                 {currentUser}
               </p>
-              <p className="text-xs text-primary-300">Secure Vault</p>
             </div>
 
             <button

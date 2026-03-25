@@ -93,7 +93,7 @@ export default function Login() {
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-1 pl-1">Master Password</label>
+            <label className="block text-sm font-medium text-gray-400 mb-1 pl-1">Password</label>
             <input
               type="password"
               required
@@ -116,13 +116,13 @@ export default function Login() {
               disabled={isLoading}
               className="w-full bg-brand hover:bg-brand-hover text-white font-bold py-3 px-4 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_var(--color-brand-glow)]"
             >
-              {isLoading ? 'Decrypting Vault...' : 'Sign In & Unlock'}
+              {isLoading ? 'Decrypting Vault...' : 'Sign In'}
             </button>
           </div>
         </form>
 
         <p className="mt-8 text-center text-sm text-gray-400">
-          Don't have an identity?{' '}
+          Don't have an account?{' '}
           <Link to="/register" className="text-brand hover:text-brand-hover font-semibold transition-colors">
             Create one
           </Link>

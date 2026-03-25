@@ -21,8 +21,8 @@ interface Message {
   receiverId: string;
   isOwnMessage: boolean;
   isVerified?: boolean;
-  pending?: boolean;   // optimistic entry not yet confirmed by server
-  failed?: boolean;    // server reported a save error
+  pending?: boolean; // optimistic entry not yet confirmed by server
+  failed?: boolean; // server reported a save error
 }
 
 interface ChatAreaProps {
@@ -52,7 +52,12 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
     const pubKey = await importPublicKey(contact.publicKey);
     const sigKey = await importEcdsaPublicKey(contact.publicSigningKey);
     const shared = await deriveSharedSecret(ecdhPrivateKey!, pubKey);
-    const entry = { contactId: contact.id, publicKey: pubKey, publicSigningKey: sigKey, sharedSecret: shared };
+    const entry = {
+      contactId: contact.id,
+      publicKey: pubKey,
+      publicSigningKey: sigKey,
+      sharedSecret: shared,
+    };
     cryptoCacheRef.current = entry;
     return entry;
   };
@@ -136,7 +141,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
           setMessages(decryptedMessages);
         }
       } catch (err: any) {
-        if (err?.name !== 'AbortError') {
+        if (err?.name !== "AbortError") {
           console.error("Failed to load history:", err);
         }
       }
@@ -150,7 +155,14 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
   }, [selectedContact?.id, userId]);
 
   useEffect(() => {
-    if (!socket || !selectedContact || !userId || !currentUser || !ecdhPrivateKey) return;
+    if (
+      !socket ||
+      !selectedContact ||
+      !userId ||
+      !currentUser ||
+      !ecdhPrivateKey
+    )
+      return;
 
     let isActive = true;
 
@@ -231,8 +243,8 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
         prev.map((m) =>
           m.id === ack.tempId
             ? { ...m, id: ack.message.id, pending: false }
-            : m
-        )
+            : m,
+        ),
       );
     };
 
@@ -241,8 +253,8 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
       if (!ack.tempId) return;
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === ack.tempId ? { ...m, pending: false, failed: true } : m
-        )
+          m.id === ack.tempId ? { ...m, pending: false, failed: true } : m,
+        ),
       );
     };
 
@@ -262,7 +274,7 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
     const textarea = textareaRef.current;
     if (textarea) {
       // Reset height to auto to recalculate shrinking
-      textarea.style.height = 'auto';
+      textarea.style.height = "auto";
       // Set new height based on the scrollHeight (content height)
       textarea.style.height = `${textarea.scrollHeight}px`;
     }
@@ -367,18 +379,16 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
               {selectedContact.username}
             </h2>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary-400 shadow-[0_0_5px_var(--color-primary-400)]"></span>
-              <span className="text-xs text-primary-400 font-medium tracking-wide">
-                E2EE Verified
-              </span>
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${isConnected ? "bg-primary-400 shadow-[0_0_5px_var(--color-primary-400)]" : "bg-secondary-700 shadow-[0_0_5px_var(--color-secondary-700)]"}`}
+              ></span>
+                <div
+                  className={`text-xs ${isConnected ? " text-primary-400" : " text-secondary-700"}`}
+                >
+                  {isConnected ? "Connected" : "Reconnecting..."}
+                </div>
             </div>
           </div>
-        </div>
-
-        <div
-          className={`text-xs px-2 py-1 rounded-full border ${isConnected ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-red-500/10 text-red-400 border-red-500/20"}`}
-        >
-          {isConnected ? "Connected" : "Reconnecting..."}
         </div>
       </header>
 
@@ -424,11 +434,11 @@ export default function ChatArea({ selectedContact }: ChatAreaProps) {
       </div>
 
       <div className="mx-6 h-px bg-linear-to-r from-transparent via-primary-400/80 to-transparent shrink-0"></div>
-<footer className="p-4 bg-primary-950 backdrop-blur-md shrink-0 z-0">
+      <footer className="p-4 bg-primary-950 backdrop-blur-md shrink-0 z-0">
         <form
           onSubmit={handleSendMessage}
           // Changed to items-end so the button stays at the bottom when expanding
-          className="flex gap-3 max-w-5xl mx-auto items-end" 
+          className="flex gap-3 max-w-5xl mx-auto items-end"
         >
           <textarea
             ref={textareaRef} // Attach the ref here
