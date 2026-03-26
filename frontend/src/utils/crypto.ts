@@ -152,7 +152,7 @@ async function getPasswordKey(password: string): Promise<CryptoKey> {
     encoder.encode(password),
     { name: 'PBKDF2' },
     false,
-    ['deriveKey']
+    ['deriveKey', 'deriveBits']
   );
 }
 
@@ -174,6 +174,55 @@ export async function deriveKeyFromPassword(password: string, salt: Uint8Array):
     false,
     ['encrypt', 'decrypt']
   );
+}
+
+/**
+ * 9b. Dual-Derivation: Derive both an auth key (sent to server) and a wrapping key (stays in browser)
+ * from a single password + salt using PBKDF2.
+ *
+ * Generates 512 bits (64 bytes) and splits them:
+ *   - First 32 bytes  → authKeyBytes   → Base64 string sent to the server for bcrypt hashing
+ *   - Last  32 bytes  → wrappingKey    → AES-GCM CryptoKey used to wrap/unwrap private keys
+ *
+ * This ensures the plaintext password NEVER leaves the browser.
+ */
+export async function deriveDualKeys(
+  password: string,
+  salt: Uint8Array
+): Promise<{ authKeyString: string; wrappingKey: CryptoKey }> {
+  const passwordKey = await getPasswordKey(password);
+
+  // Derive 512 bits (64 bytes) of key material
+  const keyMaterial = await window.crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt: salt as BufferSource,
+      iterations: 100000,
+      hash: 'SHA-256',
+    },
+    passwordKey,
+    512 // 64 bytes total
+  );
+
+  const fullBytes = new Uint8Array(keyMaterial);
+
+  // Split: first 32 bytes = auth key, last 32 bytes = wrapping key
+  const authKeyBytes = fullBytes.slice(0, 32);
+  const wrappingKeyBytes = fullBytes.slice(32, 64);
+
+  // Convert auth key to Base64 for transmission to the server
+  const authKeyString = arrayBufferToBase64(authKeyBytes.buffer);
+
+  // Import wrapping key as an AES-GCM CryptoKey (non-extractable)
+  const wrappingKey = await window.crypto.subtle.importKey(
+    'raw',
+    wrappingKeyBytes,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+
+  return { authKeyString, wrappingKey };
 }
 
 /**

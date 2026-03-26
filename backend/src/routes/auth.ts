@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import { eq, and, asc, desc, sql } from 'drizzle-orm';
 import { db, withRetry } from '../db/index';
@@ -53,11 +54,45 @@ const authenticateToken = (req: AuthenticatedRequest, res: Response, next: NextF
   }
 };
 
+// ==========================================
+// SALT PRE-FLIGHT (for login dual-derivation)
+// ==========================================
+router.get('/salt/:username', async (req, res) => {
+  try {
+    const username = req.params.username;
+
+    const existingUser = await withRetry(() =>
+      db.select({ keySalt: users.keySalt })
+        .from(users)
+        .where(eq(users.username, username))
+        .limit(1)
+    );
+
+    if (existingUser.length > 0) {
+      // User exists — return their real salt
+      return res.status(200).json({ salt: existingUser[0].keySalt });
+    }
+
+    // User does NOT exist — return a deterministic dummy salt derived from
+    // HMAC(server_secret, username) so repeated lookups for the same
+    // nonexistent user always return the same value (prevents enumeration).
+    const secret = process.env.JWT_SECRET || 'fallback-secret';
+    const hmac = crypto.createHmac('sha256', secret).update(username).digest();
+    // Take the first 16 bytes and Base64-encode to match real salt format
+    const dummySalt = hmac.subarray(0, 16).toString('base64');
+
+    return res.status(200).json({ salt: dummySalt });
+  } catch (error) {
+    console.error('Salt lookup error:', error);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 router.post('/register', async (req, res) => {
   try {
     const { 
       username, 
-      password, 
+      authKey, 
       publicKey, 
       encryptedPrivateKey, 
       keyIv, 
@@ -67,12 +102,12 @@ router.post('/register', async (req, res) => {
       signingKeyIv
     } = req.body;
 
-    if (!username || !password || !publicKey || !encryptedPrivateKey || !keyIv || !keySalt || !publicSigningKey || !encryptedSigningPrivateKey || !signingKeyIv) {
+    if (!username || !authKey || !publicKey || !encryptedPrivateKey || !keyIv || !keySalt || !publicSigningKey || !encryptedSigningPrivateKey || !signingKeyIv) {
       return res.status(400).json({ error: 'All cryptographic fields are required.' });
     }
 
     const saltRounds = 10;
-    const passwordHash = await bcrypt.hash(password, saltRounds);
+    const passwordHash = await bcrypt.hash(authKey, saltRounds);
 
     // Atomic insert — the UNIQUE constraint on username prevents duplicates
     // without a separate SELECT (avoids TOCTOU race condition).
@@ -108,10 +143,10 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const { username, authKey } = req.body;
 
-    if (!username || !password) {
-      return res.status(400).json({ error: 'Username and password are required.' });
+    if (!username || !authKey) {
+      return res.status(400).json({ error: 'Username and auth key are required.' });
     }
 
     const existingUser = await withRetry(() => db.select().from(users).where(eq(users.username, username)).limit(1));
@@ -121,7 +156,7 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid username or password.' });
     }
 
-    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    const isPasswordValid = await bcrypt.compare(authKey, user.passwordHash);
 
     if (!isPasswordValid) {
       return res.status(401).json({ error: 'Invalid username or password.' });

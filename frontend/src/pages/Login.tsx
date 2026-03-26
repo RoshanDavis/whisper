@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  deriveKeyFromPassword,
+  deriveDualKeys,
   unwrapPrivateKey,
   unwrapEcdsaPrivateKey,
   base64ToArrayBuffer
@@ -27,10 +27,22 @@ export default function Login() {
     setIsLoading(true);
 
     try {
+      // Step 1: Fetch the user's PBKDF2 salt before authenticating
+      const saltRes = await fetch(`${API_URL}/api/auth/salt/${encodeURIComponent(username)}`);
+      if (!saltRes.ok) {
+        throw new Error('Invalid username or password.');
+      }
+      const saltData = await saltRes.json();
+      const salt = new Uint8Array(base64ToArrayBuffer(saltData.salt));
+
+      // Step 2: Derive auth key (sent to server) + wrapping key (stays local)
+      const { authKeyString, wrappingKey } = await deriveDualKeys(password, salt);
+
+      // Step 3: Authenticate with the auth key (password NEVER leaves the browser)
       const response = await fetch(`${API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, authKey: authKeyString }),
         credentials: 'include', // Accept HttpOnly cookie from server
       });
 
@@ -38,11 +50,9 @@ export default function Login() {
       if (!response.ok) throw new Error(data.error || 'Authentication failed');
 
       try {
-        const salt = new Uint8Array(base64ToArrayBuffer(data.user.keySalt));
-        const wrapperKey = await deriveKeyFromPassword(password, salt);
-
-        const ecdhPrivateKey = await unwrapPrivateKey(data.user.encryptedPrivateKey, wrapperKey, data.user.keyIv);
-        const ecdsaPrivateKey = await unwrapEcdsaPrivateKey(data.user.encryptedSigningPrivateKey, wrapperKey, data.user.signingKeyIv);
+        // Step 4: Unwrap private keys using the wrapping key derived in step 2
+        const ecdhPrivateKey = await unwrapPrivateKey(data.user.encryptedPrivateKey, wrappingKey, data.user.keyIv);
+        const ecdsaPrivateKey = await unwrapEcdsaPrivateKey(data.user.encryptedSigningPrivateKey, wrappingKey, data.user.signingKeyIv);
 
         // Use the server-confirmed username to avoid input/server mismatch
         const canonicalUsername = data.user.username;

@@ -212,11 +212,11 @@ Browser generates:
 - **ECDSA** is for digital signatures — proving that a message was genuinely sent by the claimed sender.
 - Separation is cryptographic best practice: a signing key should never be used for key exchange, and vice versa.
 
-### 5.2 Key Wrapping with PBKDF2
+### 5.2 Key Wrapping with PBKDF2 (Dual-Derivation)
 
 **When:** After key generation during registration.
 
-**Where:** `Register.tsx` → `deriveKeyFromPassword()` → `wrapPrivateKey()`.
+**Where:** `Register.tsx` → `deriveDualKeys()` → `wrapPrivateKey()`.
 
 **What happens:**
 
@@ -227,42 +227,52 @@ password + random 16-byte salt
     PBKDF2 (SHA-256, 100,000 iterations)
          │
          ▼
-    AES-256-GCM wrapping key (non-extractable)
+    512 bits (64 bytes) of key material
          │
-    ┌────┴────┐
-    ▼         ▼
- Wrap ECDH   Wrap ECDSA
- private key  private key
-    │         │
-    ▼         ▼
- wrappedKey   wrappedKey
- + IV         + IV
+    ┌────┴────────────┐
+    ▼                  ▼
+  Auth Key           Wrapping Key
+  (first 32 bytes)   (last 32 bytes)
+  → Base64 string    → AES-256-GCM CryptoKey
+  → sent to server   → stays in browser
+  → bcrypt-hashed    │
+                ┌────┴────┐
+                ▼         ▼
+             Wrap ECDH   Wrap ECDSA
+             private key  private key
+                │         │
+                ▼         ▼
+             wrappedKey   wrappedKey
+             + IV         + IV
 ```
 
 **How (step by step):**
 
 1. A random 16-byte `salt` is generated with `crypto.getRandomValues()`.
 2. The user's password is imported as a raw `PBKDF2` key via `importKey('raw', ...)`.
-3. `deriveKey()` produces an AES-256-GCM key from the password + salt, using 100,000 PBKDF2 iterations.
-4. Each private key is exported to PKCS8 format, then encrypted with AES-GCM using the derived wrapping key and a random 12-byte IV.
-5. The results (wrapped key blobs + IVs) are Base64-encoded for JSON transmission.
+3. `deriveBits()` produces 512 bits (64 bytes) of key material from the password + salt, using 100,000 PBKDF2 iterations.
+4. The 64 bytes are split in half: the first 32 bytes become the **auth key** (converted to Base64, sent to the server for bcrypt hashing), and the last 32 bytes become the **wrapping key** (imported as an AES-256-GCM CryptoKey, stays in browser).
+5. Each private key is exported to PKCS8 format, then encrypted with AES-GCM using the wrapping key and a random 12-byte IV.
+6. The results (wrapped key blobs + IVs) are Base64-encoded for JSON transmission.
 
-**Why PBKDF2?**
+**Why dual-derivation?**
+- The plaintext password **never leaves the browser**. The server only sees the auth key, which is a high-entropy derivative that cannot be used to reconstruct the wrapping key.
+- The two 32-byte halves are cryptographically independent — knowing one half does not reveal the other.
 - 100,000 iterations of SHA-256 makes brute-force password guessing computationally expensive.
 - The random salt prevents rainbow table attacks.
-- The same salt is reused for both private key wrappings (ECDH + ECDSA) — this is safe because the IVs are unique, and the wrapping key is the same anyway.
 
 **What gets sent to the server:**
 
 | Field | Content | Can the server read the private key? |
 |---|---|---|
+| `authKey` | PBKDF2-derived auth key (Base64) | N/A — used for authentication only |
 | `publicKey` | Raw ECDH public key (Base64) | N/A (public) |
-| `encryptedPrivateKey` | AES-GCM wrapped ECDH private key | **No** — needs password |
-| `keyIv` | IV used for ECDH wrapping | Not useful without password |
+| `encryptedPrivateKey` | AES-GCM wrapped ECDH private key | **No** — needs the wrapping key (which server never receives) |
+| `keyIv` | IV used for ECDH wrapping | Not useful without wrapping key |
 | `keySalt` | PBKDF2 salt | Not useful without password |
 | `publicSigningKey` | Raw ECDSA public key (Base64) | N/A (public) |
-| `encryptedSigningPrivateKey` | AES-GCM wrapped ECDSA private key | **No** — needs password |
-| `signingKeyIv` | IV used for ECDSA wrapping | Not useful without password |
+| `encryptedSigningPrivateKey` | AES-GCM wrapped ECDSA private key | **No** — needs the wrapping key |
+| `signingKeyIv` | IV used for ECDSA wrapping | Not useful without wrapping key |
 
 ### 5.3 Key Unwrapping (Login)
 
@@ -273,12 +283,24 @@ password + random 16-byte salt
 **What happens:**
 
 ```
-Server returns: { keySalt, encryptedPrivateKey, keyIv, encryptedSigningPrivateKey, signingKeyIv }
+1. Browser fetches salt via GET /api/auth/salt/:username
+2. Browser derives dual keys from password + salt:
 
 password + keySalt
          │
          ▼
-    PBKDF2 → wrapperKey
+    PBKDF2 → 512 bits
+         │
+    ┌────┴────────────┐
+    ▼                  ▼
+  Auth Key           Wrapping Key
+  → sent to server   → stays in browser
+
+3. Auth key sent to server for bcrypt verification
+4. Server returns encrypted key material
+5. Browser unwraps using wrapping key:
+
+  Wrapping Key
          │
     ┌────┴────────────────┐
     ▼                     ▼
@@ -291,11 +313,12 @@ password + keySalt
 ```
 
 **How:**
-1. The salt from the server is Base64-decoded back to a `Uint8Array`.
-2. `deriveKeyFromPassword(password, salt)` re-derives the same AES-256-GCM wrapping key.
-3. `unwrapPrivateKey()` AES-GCM-decrypts the ECDH blob, then `importKey('pkcs8', ...)` restores it as an ECDH `CryptoKey`.
-4. `unwrapEcdsaPrivateKey()` does the same for the ECDSA blob, but imports with algorithm `ECDSA` and usage `['sign']`.
-5. Both `CryptoKey` objects are passed to `AuthContext.login()` and stored **only in React state** — never written to localStorage or IndexedDB.
+1. The browser fetches the user's PBKDF2 salt via `GET /api/auth/salt/:username`. If the user doesn't exist, the server returns a deterministic dummy salt (to prevent username enumeration).
+2. `deriveDualKeys(password, salt)` produces both the auth key and wrapping key from 512 bits of PBKDF2 output.
+3. The auth key is sent to the server for bcrypt verification. The password itself never leaves the browser.
+4. `unwrapPrivateKey()` AES-GCM-decrypts the ECDH blob using the wrapping key, then `importKey('pkcs8', ...)` restores it as an ECDH `CryptoKey`.
+5. `unwrapEcdsaPrivateKey()` does the same for the ECDSA blob, but imports with algorithm `ECDSA` and usage `['sign']`.
+6. Both `CryptoKey` objects are passed to `AuthContext.login()` and stored **only in React state** — never written to localStorage or IndexedDB.
 
 **Why separate unwrap functions for ECDH and ECDSA?**
 - The Web Crypto API requires you to specify the exact algorithm and key usages at import time. An ECDH key must be tagged `{ name: 'ECDH', namedCurve: 'P-256' }` with usages `['deriveKey', 'deriveBits']`, while an ECDSA key must be tagged `{ name: 'ECDSA', namedCurve: 'P-256' }` with usages `['sign']`. Using the wrong algorithm would cause the browser to reject the key.
@@ -399,17 +422,18 @@ My ECDH Private Key + Their ECDH Public Key
 **Step-by-step:**
 
 1. **Browser** generates ECDH + ECDSA key pairs.
-2. **Browser** generates random 16-byte salt, derives PBKDF2 wrapping key from password + salt.
-3. **Browser** wraps both private keys with AES-GCM, producing `{ wrappedKey, iv }` for each.
-4. **Browser** exports both public keys to Base64.
-5. **Browser** sends to server: `{ username, password, publicKey, encryptedPrivateKey, keyIv, keySalt, publicSigningKey, encryptedSigningPrivateKey, signingKeyIv }`.
-6. **Server** hashes the password with `bcrypt` (10 salt rounds).
-7. **Server** attempts an atomic INSERT with `onConflictDoNothing` on the username UNIQUE constraint.
+2. **Browser** generates random 16-byte salt.
+3. **Browser** calls `deriveDualKeys(password, salt)` — PBKDF2 produces 512 bits, split into auth key (first 32 bytes) and wrapping key (last 32 bytes). The password never leaves the browser.
+4. **Browser** wraps both private keys with AES-GCM using the wrapping key, producing `{ wrappedKey, iv }` for each.
+5. **Browser** exports both public keys to Base64.
+6. **Browser** sends to server: `{ username, authKey, publicKey, encryptedPrivateKey, keyIv, keySalt, publicSigningKey, encryptedSigningPrivateKey, signingKeyIv }`. Note: `password` is **not** sent.
+7. **Server** hashes the `authKey` with `bcrypt` (10 salt rounds) and stores it in `password_hash`.
+8. **Server** attempts an atomic INSERT with `onConflictDoNothing` on the username UNIQUE constraint.
    - If `newUser.length === 0`, the username already exists → 409 Conflict.
    - Otherwise → 201 Created.
-8. **Browser** navigates to `/login` with a flash message "Vault created successfully. Please sign in."
+9. **Browser** navigates to `/login` with a flash message "Vault created successfully. Please sign in."
 
-**Security note:** The password is sent in plaintext over HTTPS. The server hashes it with bcrypt and stores only the hash. The password is also used client-side to derive the PBKDF2 wrapping key, but the wrapping key itself is never transmitted.
+**Security note:** The plaintext password never leaves the browser. The server receives only the `authKey` — a high-entropy, PBKDF2-derived value that cannot be used to reconstruct the wrapping key or decrypt private keys.
 
 ### 6.2 Login Flow
 
@@ -417,21 +441,22 @@ My ECDH Private Key + Their ECDH Public Key
 
 **Step-by-step:**
 
-1. **Browser** sends `{ username, password }` with `credentials: 'include'`.
-2. **Server** looks up the user by username.
-3. **Server** verifies the password with `bcrypt.compare()`.
-4. **Server** signs a JWT containing `{ userId, username }` with `JWT_SECRET`, 24-hour expiry.
-5. **Server** sets an HttpOnly cookie named `whisper_token`:
+1. **Browser** sends `GET /api/auth/salt/${username}` to fetch the PBKDF2 salt.
+2. **Browser** calls `deriveDualKeys(password, salt)` — produces auth key + wrapping key. The password never leaves the browser.
+3. **Browser** sends `{ username, authKey }` with `credentials: 'include'`.
+4. **Server** looks up the user by username.
+5. **Server** verifies the auth key with `bcrypt.compare(authKey, user.passwordHash)`.
+6. **Server** signs a JWT containing `{ userId, username }` with `JWT_SECRET`, 24-hour expiry.
+7. **Server** sets an HttpOnly cookie named `whisper_token`:
    - `httpOnly: true` — inaccessible to JavaScript (XSS protection)
    - `secure: true` in production (HTTPS only)
    - `sameSite: 'lax'` — sent with top-level navigations (CSRF mitigation)
    - `maxAge: 24h`
    - `domain: '.whisper-chat.app'` in production (subdomain cookie sharing)
-6. **Server** responds with the user's public info + encrypted key material (but **not** the JWT in the body — it's only in the cookie).
-7. **Browser** derives the PBKDF2 wrapping key from password + returned salt.
-8. **Browser** unwraps both private keys into `CryptoKey` objects.
-9. **Browser** calls `AuthContext.login(canonicalUsername, userId, ecdhKey, ecdsaKey)` — stores everything in React state.
-10. **Browser** navigates to `/`.
+8. **Server** responds with the user's public info + encrypted key material (but **not** the JWT in the body — it's only in the cookie).
+9. **Browser** unwraps both private keys using the wrapping key derived in step 2.
+10. **Browser** calls `AuthContext.login(canonicalUsername, userId, ecdhKey, ecdsaKey)` — stores everything in React state.
+11. **Browser** navigates to `/`.
 
 ### 6.3 JWT Middleware
 
@@ -612,16 +637,20 @@ Migrations are generated by Drizzle Kit and applied with `npx drizzle-kit migrat
 
 All routes are defined in `backend/src/routes/auth.ts` and mounted at `/api/auth`.
 
+### `GET /salt/:username` — Pre-flight Salt Fetch
+- **Auth required:** No
+- **What:** Returns the user's PBKDF2 salt. If the user does not exist, returns a deterministic dummy salt derived from `HMAC(JWT_SECRET, username)` to prevent username enumeration timing attacks.
+
 ### `POST /register` — Create Account
 - **Auth required:** No
-- **Body:** `{ username, password, publicKey, encryptedPrivateKey, keyIv, keySalt, publicSigningKey, encryptedSigningPrivateKey, signingKeyIv }`
-- **What:** Validates all fields are present → bcrypt-hashes the password → atomic INSERT with `onConflictDoNothing` on username → returns 201 with `{ id, username }` or 409 if username taken.
+- **Body:** `{ username, authKey, publicKey, encryptedPrivateKey, keyIv, keySalt, publicSigningKey, encryptedSigningPrivateKey, signingKeyIv }`
+- **What:** Validates all fields are present → bcrypt-hashes the `authKey` → atomic INSERT with `onConflictDoNothing` on username → returns 201 with `{ id, username }` or 409 if username taken.
 - **Why `onConflictDoNothing` instead of a SELECT-then-INSERT?** Avoids a TOCTOU (Time of Check to Time of Use) race condition where two simultaneous registrations with the same username could both pass the SELECT check.
 
 ### `POST /login` — Authenticate
 - **Auth required:** No
-- **Body:** `{ username, password }`
-- **What:** Looks up user → bcrypt-compares password → signs JWT → sets HttpOnly cookie → returns user profile + all encrypted key material.
+- **Body:** `{ username, authKey }`
+- **What:** Looks up user → bcrypt-compares `authKey` against stored hash → signs JWT → sets HttpOnly cookie → returns user profile + all encrypted key material.
 - **JWT is NOT in the response body** — only in the `Set-Cookie` header.
 
 ### `GET /me` — Session Check
@@ -1013,7 +1042,7 @@ This prevents redundant `deriveKey` calls when multiple operations happen for th
 
 #### `utils/crypto.ts`
 
-17 exported functions covering the full cryptographic lifecycle:
+18 exported functions covering the full cryptographic lifecycle:
 
 | # | Function | What it does |
 |---|---|---|
@@ -1027,7 +1056,8 @@ This prevents redundant `deriveKey` calls when multiple operations happen for th
 | 6 | `deriveSharedSecret(privKey, pubKey)` | ECDH → AES-256-GCM shared key |
 | 7 | `encryptMessage(sharedKey, plaintext)` | AES-256-GCM encrypt → `{ ciphertext, iv }` |
 | 8 | `decryptMessage(sharedKey, ciphertext, iv)` | AES-256-GCM decrypt → plaintext string |
-| 9 | `deriveKeyFromPassword(password, salt)` | PBKDF2 (100k iterations, SHA-256) → AES-256-GCM key |
+| 9a | `deriveKeyFromPassword(password, salt)` | PBKDF2 (100k iterations, SHA-256) → AES-256-GCM key (legacy, still exported) |
+| 9b | `deriveDualKeys(password, salt)` | PBKDF2 → 512 bits → split into `{ authKeyString, wrappingKey }` |
 | 10 | `wrapPrivateKey(privateKey, wrapperKey)` | Export PKCS8 + AES-GCM encrypt → `{ wrappedKey, iv }` |
 | 11 | `unwrapPrivateKey(wrapped, wrapperKey, iv)` | AES-GCM decrypt + import as ECDH key |
 | 12 | `generateEcdsaKeyPair()` | Generates ECDSA P-256 key pair |
@@ -1172,9 +1202,9 @@ When you're looking at an existing conversation and a new message arrives:
 ## 13. Security Model
 
 ### What the server can see:
-- Usernames and password hashes (bcrypt)
+- Usernames and bcrypt-hashed auth keys (derived from password — never the password itself)
 - ECDH and ECDSA **public** keys (Base64)
-- **Wrapped** (encrypted) private keys — useless without the user's password
+- **Wrapped** (encrypted) private keys — useless without the wrapping key (which the server never receives)
 - PBKDF2 salt and wrapping IVs — useless without the password
 - **Ciphertext** of every message — encrypted AES-256-GCM blobs
 - IVs for each message — meaningless without the decryption key
@@ -1185,7 +1215,8 @@ When you're looking at an existing conversation and a new message arrives:
 - Plaintext of any message
 - Raw private keys (ECDH or ECDSA)
 - The shared secret between any two users
-- The user's password (only the bcrypt hash)
+- The user's password (only a PBKDF2-derived auth key, bcrypt-hashed)
+- The wrapping key (it is derived locally and never transmitted)
 
 ### Threat model & mitigations:
 
@@ -1194,8 +1225,8 @@ When you're looking at an existing conversation and a new message arrives:
 | **XSS (script injection)** | JWT stored in HttpOnly cookie — JS cannot access it. CryptoKey objects are non-serializable — even if XSS runs, it can't extract the private keys from memory. |
 | **CSRF** | `sameSite: 'lax'` on the cookie, plus CORS origin whitelisting. |
 | **Man-in-the-middle** | HTTPS in production (Secure cookie flag). AES-GCM authentication tag detects tampering. ECDSA signatures detect forgery. |
-| **Database breach** | Attacker gets only ciphertext, wrapped keys, and hashes. No plaintext. Brute-forcing bcrypt + PBKDF2 is computationally prohibitive. |
-| **Server compromise** | Even a fully compromised server cannot read messages — it never has the shared secrets or raw private keys. |
+| **Database breach** | Attacker gets only ciphertext, wrapped keys, and bcrypt-hashed auth keys. No plaintext. The auth key cannot reconstruct the wrapping key. |
+| **Server compromise** | True zero-knowledge: the server never receives the plaintext password or the wrapping key. It cannot reconstruct shared secrets or raw private keys. |
 | **Physical access (unlocked browser)** | Keys exist only in memory. Refreshing the page or closing the tab destroys them. |
 | **Replay attacks** | Each message has a unique random IV. AES-GCM rejects re-encryption with the same (key, IV) pair. Message IDs provide deduplication. |
 | **Message tampering** | AES-GCM's authentication tag rejects any modified ciphertext. ECDSA signature independently verifies the ciphertext was produced by the claimed sender. |
@@ -1205,7 +1236,6 @@ When you're looking at an existing conversation and a new message arrives:
 ### Intentional security tradeoffs:
 - **Page refresh requires re-login:** CryptoKey objects live in React state and cannot survive a page reload. This is by design — no private key material ever touches persistent storage.
 - **No Perfect Forward Secrecy (yet):** The same ECDH key pair is used for all conversations. If the ECDH private key is compromised, all past and future messages with any contact are decryptable. The Settings page placeholder mentions PFS key rotation as a planned feature.
-- **Password sent to server:** The password is transmitted over HTTPS for bcrypt hashing. It's also used client-side for PBKDF2 key derivation. The server could theoretically capture it before hashing — a fully trustless system would avoid this, but it's an acceptable tradeoff for this architecture.
 
 ---
 
@@ -1301,7 +1331,7 @@ Whisper is a zero-knowledge encrypted messaging application where:
 2. **ECDH** establishes shared secrets between users without transmitting them.
 3. **AES-256-GCM** encrypts every message with a unique random IV.
 4. **ECDSA** signs every ciphertext for authenticity verification.
-5. **PBKDF2** wraps private keys with the user's password before they touch the network.
+5. **PBKDF2 dual-derivation** splits the password into an auth key (for server authentication) and a wrapping key (for private key encryption). The password never leaves the browser.
 6. **JWT in HttpOnly cookies** handles authentication without exposing tokens to JavaScript.
 7. **Socket.IO** delivers real-time messages with multi-tab support.
 8. **Optimistic UI** provides instant feedback with server reconciliation.

@@ -4,7 +4,7 @@ import {
   generateKeyPair, 
   generateEcdsaKeyPair,
   exportPublicKey, 
-  deriveKeyFromPassword,
+  deriveDualKeys,
   wrapPrivateKey,
   arrayBufferToBase64
 } from '../utils/crypto';
@@ -27,14 +27,14 @@ export default function Register() {
       const ecdsaKeyPair = await generateEcdsaKeyPair(); 
 
       const salt = window.crypto.getRandomValues(new Uint8Array(16));
-      const wrapperKey = await deriveKeyFromPassword(password, salt);
+      const { authKeyString, wrappingKey } = await deriveDualKeys(password, salt);
 
-      const ecdhWrapped = await wrapPrivateKey(ecdhKeyPair.privateKey, wrapperKey);
-      const ecdsaWrapped = await wrapPrivateKey(ecdsaKeyPair.privateKey, wrapperKey);
+      const ecdhWrapped = await wrapPrivateKey(ecdhKeyPair.privateKey, wrappingKey);
+      const ecdsaWrapped = await wrapPrivateKey(ecdsaKeyPair.privateKey, wrappingKey);
 
       const payload = {
         username,
-        password,
+        authKey: authKeyString,
         publicKey: await exportPublicKey(ecdhKeyPair.publicKey),
         encryptedPrivateKey: ecdhWrapped.wrappedKeyBase64,
         keyIv: ecdhWrapped.ivBase64,

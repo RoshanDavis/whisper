@@ -268,15 +268,15 @@ function SidebarNav({active}:{active:string}) {
 
 /* ─── Threat data ─────────────────────────────────────────────────────────────── */
 const THREATS=[
-  {threat:'Database Breach',       sev:'CRITICAL', mit:'Server stores only AES-GCM ciphertext + bcrypt hashes. Zero plaintext. Even a full DB dump contains nothing readable without user passwords.'},
-  {threat:'Server Compromise',     sev:'CRITICAL', mit:'Zero-knowledge design. Server never possesses shared secrets or raw private keys. Compromise yields only encrypted blobs.'},
+  {threat:'Database Breach',       sev:'CRITICAL', mit:'Server stores only AES-GCM ciphertext + bcrypt-hashed auth keys. Zero plaintext. Even a full DB dump contains nothing readable — the auth key cannot reconstruct the wrapping key.'},
+  {threat:'Server Compromise',     sev:'CRITICAL', mit:'True zero-knowledge design. The server never receives the plaintext password — only a derived auth key. It cannot reconstruct the wrapping key, shared secrets, or raw private keys. Compromise yields only encrypted blobs.'},
   {threat:'XSS Attack',            sev:'HIGH',     mit:'JWT in HttpOnly cookie — JS cannot read it. CryptoKey objects are non-serializable and live only in React state.'},
   {threat:'Man-in-the-Middle',     sev:'HIGH',     mit:'HTTPS enforced (TLS). AES-GCM 128-bit auth tag detects any ciphertext tampering. ECDSA signature independently detects forgery.'},
   {threat:'Message Tampering',     sev:'HIGH',     mit:'Two independent tamper-detection layers: GCM authentication tag + ECDSA signature — on every single message.'},
   {threat:'CSRF Attack',           sev:'MED',      mit:'SameSite=Lax cookie policy + CORS origin whitelist on both REST API and Socket.IO.'},
   {threat:'Replay Attack',         sev:'MED',      mit:'Cryptographically random 96-bit IV per message. AES-GCM rejects (key, IV) reuse. Message UUIDs deduplicate on client.'},
   {threat:'Physical Access',       sev:'MED',      mit:'Keys exist only in RAM. Closing tab or refreshing destroys all CryptoKey objects. No persistent key storage.'},
-  {threat:'Brute-Force Password',  sev:'MED',      mit:'PBKDF2 × 100,000 SHA-256 iterations makes guessing computationally expensive. bcrypt on server adds a second hardening layer.'},
+  {threat:'Brute-Force Password',  sev:'MED',      mit:'Dual-derivation: PBKDF2 × 100,000 SHA-256 iterations produces both the wrapping key and the auth key. bcrypt on the server-side auth key adds a second hardening layer. The password itself never leaves the browser.'},
   {threat:'SQL Injection',         sev:'LOW',      mit:'Drizzle ORM parameterizes all queries. UUID inputs validated with regex before any database operation.'},
 ];
 const SEV:{[k:string]:{bg:string;border:string;text:string}}={
@@ -383,9 +383,9 @@ export default function About() {
             </div>
             <Panel>
               <div className="text-xs leading-relaxed space-y-3" style={{color:C.text}}>
-                <p>Whisper is built around a single guarantee: <strong style={{color:C.cyan}}>even a fully compromised server reveals no message content.</strong> This is achieved by performing all cryptographic operations exclusively inside the user's browser, using keys that never exist in plaintext outside device RAM.</p>
+                <p>Whisper is built around a single guarantee: <strong style={{color:C.cyan}}>even a fully compromised server reveals no message content.</strong> This is achieved by performing all cryptographic operations exclusively inside the user's browser, using keys that never exist in plaintext outside device RAM. The user's plaintext password never leaves the browser.</p>
                 <p>The architecture uses <strong style={{color:C.textBright}}>ECDH (Elliptic Curve Diffie-Hellman)</strong> so two users can arrive at an identical encryption key without ever transmitting it. Messages are encrypted with <strong style={{color:C.textBright}}>AES-256-GCM</strong> — an authenticated cipher that both encrypts and guarantees integrity. Every ciphertext is then signed with <strong style={{color:C.textBright}}>ECDSA</strong> so recipients can verify the message genuinely came from the claimed sender.</p>
-                <p>Private keys are wrapped (encrypted) with a key derived from the user's password via <strong style={{color:C.textBright}}>PBKDF2</strong> before upload. The server stores these encrypted blobs. Without the user's password, they are computationally useless.</p>
+                <p>Private keys are wrapped (encrypted) with a <strong style={{color:C.textBright}}>wrapping key</strong> derived via <strong style={{color:C.textBright}}>PBKDF2 dual-derivation</strong>. The password produces 512 bits of key material, split into an <strong style={{color:C.cyan}}>auth key</strong> (sent to the server for bcrypt verification) and a <strong style={{color:C.cyan}}>wrapping key</strong> (stays in the browser for key encryption). The server cannot reconstruct the wrapping key from the auth key.</p>
               </div>
             </Panel>
           </section>
@@ -564,15 +564,16 @@ export default function About() {
               </Panel>
 
               <Panel>
-                <MonoLabel>PBKDF2 Key Wrapping Flow</MonoLabel>
-                <p className="text-xs leading-relaxed mt-2 mb-4" style={{color:C.text}}>Private keys never travel the network in plaintext. Before upload, each is encrypted with a wrapping key derived from the user's password. The wrapping key itself never leaves the browser.</p>
+                <MonoLabel>PBKDF2 Dual-Derivation Flow</MonoLabel>
+                <p className="text-xs leading-relaxed mt-2 mb-4" style={{color:C.text}}>The plaintext password <strong style={{color:C.red}}>never leaves the browser</strong>. PBKDF2 derives 512 bits (64 bytes) from the password + salt. The output is split into two independent 32-byte keys: an <strong style={{color:C.cyan}}>auth key</strong> sent to the server for bcrypt verification, and a <strong style={{color:C.green}}>wrapping key</strong> that stays in the browser to encrypt/decrypt private keys.</p>
                 <div className="overflow-x-auto pb-2">
                   <div className="flex items-center gap-0 min-w-max">
                     {[
-                      {label:'Password',    sub:'user input',      color:C.amber},
-                      {label:'PBKDF2',      sub:'100k × SHA-256',  color:C.cyan},
-                      {label:'Wrapping Key',sub:'AES-256-GCM',     color:C.cyan},
-                      {label:'Wrapped Keys',sub:'stored on server', color:C.textDim},
+                      {label:'Password',     sub:'user input',         color:C.amber},
+                      {label:'PBKDF2',       sub:'100k × SHA-256',     color:C.cyan},
+                      {label:'512 bits',     sub:'64 bytes output',    color:C.cyan},
+                      {label:'Auth Key',     sub:'first 32 bytes → server', color:C.red},
+                      {label:'Wrapping Key', sub:'last 32 bytes → browser', color:C.green},
                     ].map((n,i,arr)=>(
                       <div key={i} className="flex items-center">
                         <div className="text-center px-3">
@@ -584,11 +585,12 @@ export default function About() {
                     ))}
                   </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-4">
                   {[
-                    {t:'Random 16-byte Salt',d:'Generated with crypto.getRandomValues(). Two users with the same password get different wrapping keys. Prevents rainbow table attacks.'},
-                    {t:'100,000 Iterations',d:"SHA-256 hashes the password+salt 100,000 times. Makes brute-force guessing take seconds per attempt on fast hardware instead of microseconds."},
-                    {t:'AES-GCM Wrapping',d:'Each private key is exported to PKCS8, then AES-GCM encrypted with a unique random 12-byte IV. Two separate wrapped blobs are produced.'},
+                    {t:'Random 16-byte Salt',d:'Generated with crypto.getRandomValues(). Two users with the same password get different keys. Prevents rainbow table attacks.'},
+                    {t:'100,000 Iterations',d:"SHA-256 hashes the password+salt 100,000 times. Makes brute-force guessing take seconds per attempt instead of microseconds."},
+                    {t:'Dual-Derivation Split',d:'512 bits are sliced in half. The two halves are cryptographically independent — knowing the auth key does not reveal the wrapping key.'},
+                    {t:'AES-GCM Wrapping',d:'Each private key is exported to PKCS8, then AES-GCM encrypted with the wrapping key and a unique random 12-byte IV.'},
                   ].map(c=>(
                     <div key={c.t} className="rounded-xl p-3" style={{background:'rgba(0,0,0,.3)',border:`1px solid ${C.border}`}}>
                       <div className="text-xs font-bold mb-1" style={{color:C.textBright}}>{c.t}</div>
@@ -627,7 +629,7 @@ export default function About() {
               <Panel>
                 <MonoLabel color={C.green}>Registration Flow</MonoLabel>
                 <div className="mt-3 space-y-2.5">
-                  {['Generate ECDH + ECDSA key pairs in browser','Generate random 16-byte PBKDF2 salt','Derive AES-256-GCM wrapping key from password + salt','Wrap both private keys with AES-GCM (separate IVs)','POST all fields including wrapped keys + public keys','Server: bcrypt-hash password (10 rounds)','Server: INSERT with onConflictDoNothing on username','Browser: navigate to /login with success flash'].map((s,i)=>(
+                  {['Generate ECDH + ECDSA key pairs in browser','Generate random 16-byte PBKDF2 salt','Dual-derive: PBKDF2(password, salt) → 512 bits → auth key + wrapping key','Wrap both private keys with wrapping key via AES-GCM (separate IVs)','POST authKey + wrapped keys + public keys (password never sent)','Server: bcrypt-hash the authKey (10 rounds)','Server: INSERT with onConflictDoNothing on username','Browser: navigate to /login with success flash'].map((s,i)=>(
                     <div key={i} className="flex gap-2.5 items-start">
                       <span className="text-[10px] font-bold rounded px-1.5 py-0.5 shrink-0" style={{background:'rgba(0,255,136,.1)',color:C.green}}>{i+1}</span>
                       <span className="text-xs leading-relaxed" style={{color:C.text}}>{s}</span>
@@ -638,7 +640,7 @@ export default function About() {
               <Panel>
                 <MonoLabel color={C.cyan}>Login + Key Unwrapping</MonoLabel>
                 <div className="mt-3 space-y-2.5">
-                  {['POST username + password over HTTPS','Server: bcrypt.compare() verifies password hash','Server: sign JWT { userId, username } — 24h expiry','Server: set HttpOnly Secure SameSite=Lax cookie','Server: return profile + encrypted key material in body','Browser: re-derive PBKDF2 wrapping key from password + salt','Browser: AES-GCM decrypt both private key blobs','Browser: importKey() both blobs as ECDH + ECDSA CryptoKeys','AuthContext.login() stores keys in React state — never localStorage'].map((s,i)=>(
+                  {['GET /salt/:username — fetch PBKDF2 salt (returns dummy salt for nonexistent users to prevent enumeration)','Browser: dual-derive PBKDF2(password, salt) → auth key + wrapping key','POST username + authKey (password never sent over the network)','Server: bcrypt.compare() verifies authKey against stored hash','Server: sign JWT { userId, username } — 24h expiry','Server: set HttpOnly Secure SameSite=Lax cookie + return encrypted key material','Browser: unwrap both private keys using the wrapping key (derived locally)','Browser: importKey() both blobs as ECDH + ECDSA CryptoKeys','AuthContext.login() stores keys in React state — never localStorage'].map((s,i)=>(
                     <div key={i} className="flex gap-2.5 items-start">
                       <span className="text-[10px] font-bold rounded px-1.5 py-0.5 shrink-0" style={{background:C.cyanDim,color:C.cyan}}>{i+1}</span>
                       <span className="text-xs leading-relaxed" style={{color:C.text}}>{s}</span>
@@ -806,9 +808,7 @@ export default function About() {
                   {t:'Page Refresh Requires Re-Login', verdict:'Intentional security decision', color:C.amber,
                     d:'CryptoKey objects live only in React state and cannot be serialized to localStorage or IndexedDB without compromising security. A page refresh destroys all key material permanently. This is by design — physical access to an unattended computer cannot recover session keys. Worse UX, meaningfully better security.'},
                   {t:'No Perfect Forward Secrecy (PFS)', verdict:'Known limitation ', color:C.red,
-                    d:"The same ECDH key pair is used for all conversations. If the ECDH private key is ever compromised, all stored ciphertext on the server becomes decryptable. True PFS requires ephemeral per-session key rotation (Signal Protocol's Double Ratchet). Significantly more complex to implement. Listed as a future enhancement in CONTEXT.md."},
-                  {t:'Password Transmitted to Server', verdict:'Known limitation ', color:C.red,
-                    d:"The user's password is sent over HTTPS for bcrypt verification server-side. It's also used client-side for PBKDF2 derivation. A fully trustless design would use SRP (Secure Remote Password Protocol) — proving knowledge of the password without transmitting it. The current design trusts TLS to protect the password in transit."},
+                    d:"The same ECDH key pair is used for all conversations. If the ECDH private key is ever compromised, all stored ciphertext on the server becomes decryptable. True PFS requires ephemeral per-session key rotation (Signal Protocol's Double Ratchet). Significantly more complex to implement."},
                 ].map(c=>(
                   <div key={c.t} className="rounded-xl p-4" style={{background:'rgba(0,0,0,.25)',border:`1px solid ${C.border}`}}>
                     <div className="flex items-center gap-2 mb-1 flex-wrap">

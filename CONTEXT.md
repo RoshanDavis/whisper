@@ -17,7 +17,7 @@ The application uses the **ECDH** algorithm for asymmetric key exchange to agree
 * **Database:** PostgreSQL (with Drizzle ORM 0.45)
 * **Real-Time Routing:** Socket.IO 4.8
 * **Cryptography Engine:** Native Web Crypto API (browser-side)
-* **Authentication:** JWT (24h expiry) stored in HttpOnly cookies; bcrypt password hashing
+* **Authentication:** JWT (24h expiry) stored in HttpOnly cookies; bcrypt hashing of PBKDF2-derived auth key (password never leaves the browser)
 * **Deployment (Planned):** Vercel (Frontend), Render/Railway (Backend)
 
 ## 3. Cryptographic Implementation Strategy
@@ -28,9 +28,9 @@ The application uses the **ECDH** algorithm for asymmetric key exchange to agree
 * **Digital Signatures:** ECDSA signs every outgoing ciphertext. Recipients verify the signature against the sender's public signing key to confirm message authenticity and integrity.
 
 ### Key Management
-* On **registration**, the browser generates two key pairs (ECDH + ECDSA). Each private key is wrapped (encrypted) with an AES-GCM key derived from the user's password via PBKDF2 (with a random 16-byte salt). Only the **wrapped** private keys, their IVs, and the salt are sent to the server. The server never sees raw private key material.
-* On **login**, the server returns the wrapped key material. The browser re-derives the wrapping key from the password + stored salt and unwraps both private keys into `CryptoKey` objects held **in-memory only** (React state via `AuthContext`). No private key material is written to `localStorage`.
-* **Server Role:** Blind courier. The server receives, stores, and broadcasts only the `ciphertext`, `iv`, and `signature`. It never sees plaintext or raw private keys.
+* On **registration**, the browser generates two key pairs (ECDH + ECDSA). The user's password is processed through **PBKDF2 dual-derivation**: 512 bits of key material are derived from the password + a random 16-byte salt, then split into an **auth key** (first 32 bytes, sent to the server for bcrypt hashing) and a **wrapping key** (last 32 bytes, stays in the browser). Each private key is wrapped (encrypted) with AES-GCM using the wrapping key. Only the **wrapped** private keys, their IVs, the salt, and the auth key are sent to the server. The server never sees the plaintext password, the wrapping key, or raw private key material.
+* On **login**, the browser first fetches the PBKDF2 salt via `GET /api/auth/salt/:username` (returns a deterministic dummy salt for non-existent users to prevent username enumeration). It then re-derives the dual keys; the auth key is sent to the server for bcrypt verification, and the wrapping key is used locally to unwrap both private keys into `CryptoKey` objects held **in-memory only** (React state via `AuthContext`). No private key material is written to `localStorage`.
+* **Server Role:** Blind courier. The server receives, stores, and broadcasts only the `ciphertext`, `iv`, and `signature`. It never sees plaintext, raw private keys, or the wrapping key.
 
 ## 4. Authentication & Session Model
 
@@ -58,7 +58,7 @@ Defined in `backend/src/db/schema.ts`.
 |---|---|---|
 | `id` | `uuid` | PK, `defaultRandom()` |
 | `username` | `text` | `NOT NULL`, `UNIQUE` |
-| `password_hash` | `text` | bcrypt hash |
+| `password_hash` | `text` | bcrypt hash of PBKDF2-derived auth key (not the plaintext password) |
 | `public_key` | `text` | ECDH public key (base64) |
 | `encrypted_private_key` | `text` | AES-GCM wrapped ECDH private key |
 | `key_iv` | `text` | IV used for ECDH key wrapping |
@@ -123,8 +123,9 @@ All routes are defined in `backend/src/routes/auth.ts`.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `POST` | `/register` | No | Create account with all key material |
-| `POST` | `/login` | No | Authenticate; sets HttpOnly JWT cookie; returns wrapped key material (JWT is NOT included in the JSON response body) |
+| `GET` | `/salt/:username` | No | Returns the user's PBKDF2 salt (or a deterministic dummy salt for nonexistent users to prevent enumeration) |
+| `POST` | `/register` | No | Create account with authKey + all key material (password never sent) |
+| `POST` | `/login` | No | Authenticate with authKey; sets HttpOnly JWT cookie; returns wrapped key material (JWT is NOT included in the JSON response body) |
 | `GET` | `/me` | Yes | Returns authenticated user's profile + wrapped key material |
 | `POST` | `/logout` | No | Clears the `whisper_token` cookie and disconnects the user's active Socket.IO sessions |
 | `GET` | `/users/:id/key` | No | Fetch a user's ECDH + ECDSA public keys by user ID |
@@ -171,8 +172,8 @@ All routes are guarded by `isAuthenticated`. Redirects use `<Navigate replace>` 
 | `ContactsSidebar` | `components/ContactsSidebar.tsx` | Left sidebar: exports `Contact` interface (with `lastActive?` and `status?` fields, shared with `ChatArea`); fetches inbox via `GET /api/auth/inbox` using `authFetch`; debounced re-fetch (300ms) on `receiveMessage` / `inboxUpdated` socket events; `AbortController` prevents stale fetch races; add-contact modal trims username, sends only `contactUsername`, uses `resetAddContactModal()` helper; accept (`PATCH`) / reject (`DELETE`) pending contacts; search/filter contacts client-side |
 | `ChatArea` | `components/ChatArea.tsx` | Main chat view: clears stale messages immediately on contact switch; loads encrypted history via `authFetch` with `AbortController` + stale-contact snapshot guard + `res.ok` check; caches derived crypto keys per contact in a `useRef` (`publicKey`, `publicSigningKey`, `sharedSecret`); decrypts using in-memory `ecdhPrivateKey` from AuthContext; verifies ECDSA signatures (skips own messages); real-time handlers: `receiveMessage` (isActive flag, deduplicate by id, verify + decrypt), `messageSaved` (replace tempId with real DB id, clear pending flag), `messageError` (mark optimistic message as failed); optimistic send uses `crypto.randomUUID()` for collision-safe tempId with rollback on crypto error; auto-resize textarea (grows to max-h-32); Enter sends, Shift+Enter for newline; uses exported `Contact` type from `ContactsSidebar` (no `any`) |
 | `Chat` | `pages/Chat.tsx` | Layout page composing `ContactsSidebar` + `ChatArea` with selected contact state |
-| `Login` | `pages/Login.tsx` | Login form: posts to `/api/auth/login` with `credentials: 'include'`; derives PBKDF2 wrapping key from password + server-returned salt; unwraps both private keys into CryptoKey objects; calls `login(canonicalUsername, userId, ecdhKey, ecdsaKey)` using server-confirmed username |
-| `Register` | `pages/Register.tsx` | Registration form: generates ECDH + ECDSA key pairs in browser; wraps private keys with password-derived AES key; posts all material (public keys, wrapped private keys, IVs, salt) to `/api/auth/register` |
+| `Login` | `pages/Login.tsx` | Login form: fetches PBKDF2 salt via `GET /api/auth/salt/:username`; derives dual keys with `deriveDualKeys(password, salt)` → auth key + wrapping key; posts `{ username, authKey }` to `/api/auth/login` (password never sent); unwraps both private keys using wrapping key; calls `login(canonicalUsername, userId, ecdhKey, ecdsaKey)` |
+| `Register` | `pages/Register.tsx` | Registration form: generates ECDH + ECDSA key pairs in browser; derives dual keys with `deriveDualKeys(password, salt)` → auth key + wrapping key; wraps private keys with wrapping key via AES-GCM; posts `{ username, authKey, ... }` to `/api/auth/register` (password never sent) |
 | `Settings` | `pages/Settings.tsx` | Settings page (placeholder) |
 | `About` | `pages/About.tsx` | About page |
 
@@ -180,7 +181,7 @@ All routes are guarded by `isAuthenticated`. Redirects use `<Navigate replace>` 
 
 | File | Exports | Purpose |
 |---|---|---|
-| `utils/crypto.ts` | `generateKeyPair`, `generateEcdsaKeyPair`, `exportPublicKey`, `importPublicKey`, `importEcdsaPublicKey`, `deriveKeyFromPassword`, `wrapPrivateKey`, `unwrapPrivateKey`, `unwrapEcdsaPrivateKey`, `deriveSharedSecret`, `encryptMessage`, `decryptMessage`, `signData`, `verifySignature`, `base64ToArrayBuffer`, `arrayBufferToBase64`, `exportPrivateKey`, `importPrivateKey`, `importEcdsaPrivateKey` | All Web Crypto API wrappers for ECDH, ECDSA, AES-GCM, PBKDF2 |
+| `utils/crypto.ts` | `generateKeyPair`, `generateEcdsaKeyPair`, `exportPublicKey`, `importPublicKey`, `importEcdsaPublicKey`, `deriveKeyFromPassword`, `deriveDualKeys`, `wrapPrivateKey`, `unwrapPrivateKey`, `unwrapEcdsaPrivateKey`, `deriveSharedSecret`, `encryptMessage`, `decryptMessage`, `signData`, `verifySignature`, `base64ToArrayBuffer`, `arrayBufferToBase64`, `exportPrivateKey`, `importPrivateKey`, `importEcdsaPrivateKey` | All Web Crypto API wrappers for ECDH, ECDSA, AES-GCM, PBKDF2 (including dual-derivation) |
 | `utils/api.ts` | `API_URL`, `authFetch(input, init?)` | `API_URL`: `import.meta.env.VITE_API_URL \|\| ''`; `authFetch`: fetch wrapper that always sends `credentials: 'include'`, auto-redirects to `/login` and triggers cross-tab sync on 401/403 |
 | `utils/contactColor.ts` | `getContactColor(username)` | Deterministic hash -> one of 12 Tailwind contact colors; shared by `ChatArea` and `ContactsSidebar` (extracted from duplicated inline code) |
 
@@ -268,6 +269,7 @@ npm run dev                 # Vite -> http://localhost:5173
 * [x] **Phase 7.11 (Resilience & DX):** Database connection pool tuning (keepAlive, idleTimeout, heartbeat, debounced warmup); `withRetry` helper wraps all DB calls with exponential backoff; `authFetch` utility auto-redirects on 401/403 + cross-tab sync; `GET /api/health` endpoint + frontend wake-up gate with polling spinner; pool pre-warm on server start; auto-resize textarea in ChatArea
 * [x] **Phase 7.12 (Documentation):** Added `HowItWorks.md` — comprehensive technical breakdown of the entire codebase (crypto, auth, DB, API, sockets, frontend architecture, data flows, security model)
 * [x] **Phase 8:** Deployment & Network Traffic Verification
+* [x] **Phase 8.1 (Zero-Knowledge Auth):** PBKDF2 dual-derivation — password never leaves browser. `deriveDualKeys()` splits 512 bits into auth key (sent to server, bcrypt-hashed) + wrapping key (stays in browser). Added `GET /salt/:username` with deterministic dummy salt for non-existent users (prevents enumeration). Updated `Register.tsx`, `Login.tsx`, `auth.ts`, and `About.tsx`. **Breaking change:** existing `password_hash` entries are incompatible — requires re-registration.
 
 ## 12. Pending Action Items - DONE
 1. **(Production)** Set `CORS_ORIGIN` and `NODE_ENV=production` on the backend; optionally set `VITE_API_URL` on the frontend if the API/Socket.IO server is on a different origin.
