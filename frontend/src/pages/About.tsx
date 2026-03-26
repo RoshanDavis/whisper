@@ -809,6 +809,8 @@ export default function About() {
                     d:'CryptoKey objects live only in React state and cannot be serialized to localStorage or IndexedDB without compromising security. A page refresh destroys all key material permanently. This is by design — physical access to an unattended computer cannot recover session keys. Worse UX, meaningfully better security.'},
                   {t:'No Perfect Forward Secrecy (PFS)', verdict:'Known limitation ', color:C.red,
                     d:"The same ECDH key pair is used for all conversations. If the ECDH private key is ever compromised, all stored ciphertext on the server becomes decryptable. True PFS requires ephemeral per-session key rotation (Signal Protocol's Double Ratchet). Significantly more complex to implement."},
+                  {t:'No Password Recovery', verdict:'Intentional security decision', color:C.amber,
+                    d:"The password is the sole input to PBKDF2 dual-derivation, which produces the wrapping key that encrypts your private keys. The server never receives the password or the wrapping key \u2014 so it cannot help you recover them. If you forget your password, your private keys are permanently inaccessible: no password reset, no account recovery, no message history. This is the inherent cost of a true zero-knowledge system."},
                 ].map(c=>(
                   <div key={c.t} className="rounded-xl p-4" style={{background:'rgba(0,0,0,.25)',border:`1px solid ${C.border}`}}>
                     <div className="flex items-center gap-2 mb-1 flex-wrap">

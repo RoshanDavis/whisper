@@ -1236,6 +1236,7 @@ When you're looking at an existing conversation and a new message arrives:
 ### Intentional security tradeoffs:
 - **Page refresh requires re-login:** CryptoKey objects live in React state and cannot survive a page reload. This is by design — no private key material ever touches persistent storage.
 - **No Perfect Forward Secrecy (yet):** The same ECDH key pair is used for all conversations. If the ECDH private key is compromised, all past and future messages with any contact are decryptable. The Settings page placeholder mentions PFS key rotation as a planned feature.
+- **No password recovery:** The password is the sole input to PBKDF2 dual-derivation, which produces the wrapping key. The server never receives the password or the wrapping key. If the user forgets their password, their private keys are permanently inaccessible — no reset, no recovery, no message history. This is the inherent cost of zero-knowledge.
 
 ---
 
