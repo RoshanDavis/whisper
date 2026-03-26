@@ -267,9 +267,9 @@ npm run dev                 # Vite -> http://localhost:5173
 * [x] **Phase 7.10 (Auto-Contacts & Pending State):** Added `status` column to contacts (`accepted` / `pending`); auto-create `pending` contact for receiver on every `sendMessage` (`onConflictDoNothing`); `inboxUpdated` socket event notifies receiver when a new pending contact is created; `POST /contacts/add` uses `onConflictDoUpdate` to upgrade `pending` → `accepted`; `PATCH /contacts/:contactId/accept` and `DELETE /contacts/:contactId` routes for accept/reject; ContactsSidebar shows accept/reject buttons for pending contacts; debounced inbox re-fetch on `receiveMessage` / `inboxUpdated`
 * [x] **Phase 7.11 (Resilience & DX):** Database connection pool tuning (keepAlive, idleTimeout, heartbeat, debounced warmup); `withRetry` helper wraps all DB calls with exponential backoff; `authFetch` utility auto-redirects on 401/403 + cross-tab sync; `GET /api/health` endpoint + frontend wake-up gate with polling spinner; pool pre-warm on server start; auto-resize textarea in ChatArea
 * [x] **Phase 7.12 (Documentation):** Added `HowItWorks.md` — comprehensive technical breakdown of the entire codebase (crypto, auth, DB, API, sockets, frontend architecture, data flows, security model)
-* [ ] **Phase 8:** Deployment & Network Traffic Verification
+* [x] **Phase 8:** Deployment & Network Traffic Verification
 
-## 12. Pending Action Items
+## 12. Pending Action Items - DONE
 1. **(Production)** Set `CORS_ORIGIN` and `NODE_ENV=production` on the backend; optionally set `VITE_API_URL` on the frontend if the API/Socket.IO server is on a different origin.
 2. **Deploy frontend to Vercel** (`vercel.json` SPA rewrite already configured) and **backend to Render/Railway**.
 3. **Verify E2EE over the network** — inspect that only ciphertext, IVs, and signatures traverse the wire; no plaintext leakage.
