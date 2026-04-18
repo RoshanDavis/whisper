@@ -53,6 +53,7 @@ export default function App() {
       <div className="min-h-screen flex flex-col items-center justify-center bg-primary-950 text-primary-50">
         <div className="animate-spin rounded-full h-10 w-10 border-2 border-primary-400 border-t-transparent mb-4" />
         <p className="text-sm tracking-wide">Waking up secure server...</p>
+        <p className="text-sm tracking-wide">The server needs to perform a cold start if its not already running. This may take 2-3 minutes. </p>
       </div>
     );
   }
