@@ -69,7 +69,7 @@ export async function importPublicKey(base64Key: string): Promise<CryptoKey> {
     'raw',
     buffer,
     { name: 'ECDH', namedCurve: 'P-256' },
-    true,
+    false,
     []
   );
 }
@@ -97,7 +97,7 @@ export async function deriveSharedSecret(privateKey: CryptoKey, publicKey: Crypt
     { name: 'ECDH', public: publicKey },
     privateKey,
     { name: 'AES-GCM', length: 256 },
-    true,
+    false,
     ['encrypt', 'decrypt']
   );
 }
@@ -267,7 +267,7 @@ export async function unwrapPrivateKey(wrappedKeyBase64: string, wrapperKey: Cry
     'pkcs8',
     decryptedKeyBuffer,
     { name: 'ECDH', namedCurve: 'P-256' },
-    true,
+    false,
     ['deriveKey', 'deriveBits']
   );
 }
@@ -299,7 +299,7 @@ export async function importEcdsaPublicKey(base64Key: string): Promise<CryptoKey
     'raw',
     buffer,
     { name: 'ECDSA', namedCurve: 'P-256' },
-    true,
+    false,
     ['verify']
   );
 }
@@ -325,7 +325,7 @@ export async function unwrapEcdsaPrivateKey(wrappedKeyBase64: string, wrapperKey
     'pkcs8',
     decryptedKeyBuffer,
     { name: 'ECDSA', namedCurve: 'P-256' },
-    true,
+    false,
     ['sign']
   );
 }
